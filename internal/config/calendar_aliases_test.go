@@ -122,3 +122,27 @@ func TestCalendarAliasNormalization(t *testing.T) {
 		t.Fatalf("expected alias delete")
 	}
 }
+
+func TestSetCalendarAlias_Validation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
+
+	tests := []struct {
+		name       string
+		alias      string
+		calendarID string
+	}{
+		{name: "empty alias", alias: "", calendarID: "family@group.calendar.google.com"},
+		{name: "alias with whitespace", alias: "my family", calendarID: "family@group.calendar.google.com"},
+		{name: "empty calendar ID", alias: "family", calendarID: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := SetCalendarAlias(tt.alias, tt.calendarID); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}

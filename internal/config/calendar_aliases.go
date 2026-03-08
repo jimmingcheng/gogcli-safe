@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 func NormalizeCalendarAlias(alias string) string {
 	return strings.ToLower(strings.TrimSpace(alias))
@@ -50,40 +53,41 @@ func ResolveCalendarID(calendarID string) (string, error) {
 func SetCalendarAlias(alias, calendarID string) error {
 	alias = NormalizeCalendarAlias(alias)
 	calendarID = strings.TrimSpace(calendarID)
-
-	cfg, err := ReadConfig()
-	if err != nil {
-		return err
+	if alias == "" {
+		return fmt.Errorf("calendar alias must not be empty")
+	}
+	if strings.ContainsAny(alias, " \t\r\n") {
+		return fmt.Errorf("calendar alias must not contain whitespace")
+	}
+	if calendarID == "" {
+		return fmt.Errorf("calendar ID must not be empty")
 	}
 
-	if cfg.CalendarAliases == nil {
-		cfg.CalendarAliases = map[string]string{}
-	}
-
-	cfg.CalendarAliases[alias] = calendarID
-
-	return WriteConfig(cfg)
+	return UpdateConfig(func(cfg *File) error {
+		if cfg.CalendarAliases == nil {
+			cfg.CalendarAliases = map[string]string{}
+		}
+		cfg.CalendarAliases[alias] = calendarID
+		return nil
+	})
 }
 
 func DeleteCalendarAlias(alias string) (bool, error) {
 	alias = NormalizeCalendarAlias(alias)
 
-	cfg, err := ReadConfig()
-	if err != nil {
-		return false, err
-	}
-
-	if cfg.CalendarAliases == nil {
-		return false, nil
-	}
-
-	if _, ok := cfg.CalendarAliases[alias]; !ok {
-		return false, nil
-	}
-
-	delete(cfg.CalendarAliases, alias)
-
-	return true, WriteConfig(cfg)
+	deleted := false
+	err := UpdateConfig(func(cfg *File) error {
+		if cfg.CalendarAliases == nil {
+			return nil
+		}
+		if _, ok := cfg.CalendarAliases[alias]; !ok {
+			return nil
+		}
+		delete(cfg.CalendarAliases, alias)
+		deleted = true
+		return nil
+	})
+	return deleted, err
 }
 
 func ListCalendarAliases() (map[string]string, error) {
