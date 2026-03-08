@@ -28,7 +28,6 @@
 - Drive: add `drive ls --all` (alias `--global`) to list across all accessible files; make `--all` and `--parent` mutually exclusive. (#107) — thanks @struong.
 - Sheets: add `sheets insert` to insert rows/columns into a sheet. (#203) — thanks @andybergon.
 - Sheets: add `sheets links` (alias `hyperlinks`) to list cell links from ranges, including rich-text links. (#374) — thanks @omothm.
-- Docs: update install docs to use the official Homebrew core formula (`brew install gogcli`). (#361) — thanks @zeldrisho.
 
 ### Fixed
 - Timezone: embed the IANA timezone database so Windows builds can resolve calendar timezones correctly. (#388) — thanks @visionik.
@@ -40,10 +39,7 @@
 - Auth: persist rotated OAuth refresh tokens returned during API calls so later commands keep working without re-auth. (#373) — thanks @joshp123.
 - Auth: allow pure service-account mode when the configured subject matches the service account itself, instead of forcing domain-wide delegation impersonation. (#399) — thanks @carrotRakko.
 - Auth: keep Keep-only service-account fallback isolated to Keep commands so other Google services do not accidentally pick it up. (#414) — thanks @jgwesterlund.
-- Secrets: verify keyring token writes by reading them back, so macOS headless Keychain failures return an actionable error instead of silently storing 0 bytes. (#270) — thanks @zerone0x.
-- Secrets: respect empty `GOG_KEYRING_PASSWORD` (treat set-to-empty as intentional; avoids headless prompts). (#269) — thanks @zerone0x.
 - Calendar: use `Calendars.Get` for timezone lookups so service-account flows don’t 404 on `calendarList/primary`. (#325) — thanks @markwatson.
-- Security: require confirmation before public Drive shares, Gmail forwarding filters, and Gmail delegate grants in no-input/agent flows. (#317) — thanks @salmonumbrella.
 - Contacts: send the required `copyMask` when deleting "other contacts", avoiding People API 400 errors. (#384) — thanks @rbansal42.
 - Gmail: fall back to `MimeType` charset hints when `Content-Type` headers are missing so GBK/GB2312 message bodies decode correctly. (#428) — thanks @WinnCook.
 - Gmail: `drafts update --quote` now picks a non-draft, non-self message from thread fallback (or errors clearly), avoiding self-quote loops and wrong reply headers. (#394) — thanks @salmonumbrella.
@@ -60,7 +56,15 @@
 - Sheets: make `sheets metadata --plain` emit real TSV tab delimiters, with regression coverage for plain tabular sheet output. (#298) — thanks @mahsumaktas.
 - CLI: show root help instead of a parse error when `gog` is run with no arguments. (#342) — thanks @cstenglein.
 - CLI: include the current partial token in fish shell completion so `gog __complete` sees the active word under the cursor. (#123) — thanks @GiGurra.
+
+### Security & Reliability
+- Secrets: verify keyring token writes by reading them back, so macOS headless Keychain failures return an actionable error instead of silently storing 0 bytes. (#270) — thanks @zerone0x.
+- Secrets: respect empty `GOG_KEYRING_PASSWORD` (treat set-to-empty as intentional; avoids headless prompts). (#269) — thanks @zerone0x.
+- Security: require confirmation before public Drive shares, Gmail forwarding filters, and Gmail delegate grants in no-input/agent flows. (#317) — thanks @salmonumbrella.
 - Security: redact stored Gmail watch webhook bearer tokens in `gmail watch status` text and JSON output unless `--show-secrets` is set. (#136) — thanks @paveg.
+
+### Tooling & Docs
+- Docs: update install docs to use the official Homebrew core formula (`brew install gogcli`). (#361) — thanks @zeldrisho.
 - Contacts: fix grouped parameter types in CRUD helpers to restore builds on newer Go toolchains. (#355) — thanks @laihenyi.
 - CI: validate release tags and quote the checkout ref in the release workflow to block tag-script injection on manual releases. (#299) — thanks @salmonumbrella.
 - Build: refresh the dependency stack to Go 1.26.1, current Go indirects, GitHub Actions v6/v7 pins, and current Cloudflare worker dependencies.

@@ -102,27 +102,7 @@ func (c *SlidesCreateFromTemplateCmd) Run(ctx context.Context, flags *RootFlags)
 		return fmt.Errorf("failed to create slides service: %w", err)
 	}
 
-	// Build batch update requests for text replacement
-	requests := make([]*slides.Request, 0, len(replacements))
-	for key, value := range replacements {
-		searchText := key
-		if !c.Exact {
-			// Wrap with {{}} if not already present
-			if !strings.HasPrefix(key, "{{") || !strings.HasSuffix(key, "}}") {
-				searchText = fmt.Sprintf("{{%s}}", key)
-			}
-		}
-
-		requests = append(requests, &slides.Request{
-			ReplaceAllText: &slides.ReplaceAllTextRequest{
-				ContainsText: &slides.SubstringMatchCriteria{
-					Text:      searchText,
-					MatchCase: true,
-				},
-				ReplaceText: value,
-			},
-		})
-	}
+	requests := buildTemplateReplacementRequests(replacements, c.Exact)
 
 	// Execute batch update
 	result, err := slidesSvc.Presentations.BatchUpdate(presentationID, &slides.BatchUpdatePresentationRequest{
@@ -135,19 +115,7 @@ func (c *SlidesCreateFromTemplateCmd) Run(ctx context.Context, flags *RootFlags)
 		return fmt.Errorf("text replacement failed: %w", err)
 	}
 
-	// Collect replacement statistics
-	replacementStats := make(map[string]int64)
-	for i, reply := range result.Replies {
-		if reply.ReplaceAllText != nil {
-			// Get the original key from requests
-			if i < len(requests) && requests[i].ReplaceAllText != nil {
-				searchText := requests[i].ReplaceAllText.ContainsText.Text
-				// Remove {{}} for display if present
-				displayKey := strings.TrimSuffix(strings.TrimPrefix(searchText, "{{"), "}}")
-				replacementStats[displayKey] = reply.ReplaceAllText.OccurrencesChanged
-			}
-		}
-	}
+	replacementStats := collectTemplateReplacementStats(requests, result.Replies)
 
 	// Output results
 	if outfmt.IsJSON(ctx) {
@@ -242,4 +210,45 @@ func (c *SlidesCreateFromTemplateCmd) parseReplacements() (map[string]string, er
 	}
 
 	return result, nil
+}
+
+func buildTemplateReplacementRequests(replacements map[string]string, exact bool) []*slides.Request {
+	requests := make([]*slides.Request, 0, len(replacements))
+	for key, value := range replacements {
+		requests = append(requests, &slides.Request{
+			ReplaceAllText: &slides.ReplaceAllTextRequest{
+				ContainsText: &slides.SubstringMatchCriteria{
+					Text:      templateReplacementSearchText(key, exact),
+					MatchCase: true,
+				},
+				ReplaceText: value,
+			},
+		})
+	}
+	return requests
+}
+
+func collectTemplateReplacementStats(requests []*slides.Request, replies []*slides.Response) map[string]int64 {
+	stats := make(map[string]int64)
+	for i, reply := range replies {
+		if reply == nil || reply.ReplaceAllText == nil || i >= len(requests) || requests[i] == nil || requests[i].ReplaceAllText == nil {
+			continue
+		}
+		stats[templateReplacementDisplayKey(requests[i].ReplaceAllText.ContainsText.Text)] = reply.ReplaceAllText.OccurrencesChanged
+	}
+	return stats
+}
+
+func templateReplacementSearchText(key string, exact bool) string {
+	if exact {
+		return key
+	}
+	if strings.HasPrefix(key, "{{") && strings.HasSuffix(key, "}}") {
+		return key
+	}
+	return fmt.Sprintf("{{%s}}", key)
+}
+
+func templateReplacementDisplayKey(searchText string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(searchText, "{{"), "}}")
 }
