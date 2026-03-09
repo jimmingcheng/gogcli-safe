@@ -33,6 +33,7 @@ func (c *GmailSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 	if query == "" {
 		return usage("missing query")
 	}
+	query = augmentGmailQuery(ctx, query)
 
 	svc, err := newGmailService(ctx, account)
 	if err != nil {
@@ -99,6 +100,7 @@ func (c *GmailSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 	if err != nil {
 		return err
 	}
+	items = filterThreadItems(ctx, items)
 
 	if outfmt.IsJSON(ctx) {
 		if writeErr := outfmt.WriteJSON(ctx, os.Stdout, map[string]any{

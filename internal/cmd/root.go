@@ -11,6 +11,7 @@ import (
 	"github.com/alecthomas/kong"
 	"golang.org/x/term"
 
+	"github.com/steipete/gogcli/internal/accessctl"
 	"github.com/steipete/gogcli/internal/authclient"
 	"github.com/steipete/gogcli/internal/config"
 	"github.com/steipete/gogcli/internal/errfmt"
@@ -33,6 +34,9 @@ type RootFlags struct {
 	Client         string `help:"OAuth client name (selects stored credentials + token bucket)" default:"${client}"`
 	AccessToken    string `help:"Use provided access token directly (bypasses stored refresh tokens; token expires in ~1h)" env:"GOG_ACCESS_TOKEN"` //nolint:gosec // CLI/env input, not an embedded secret
 	EnableCommands string `help:"Comma-separated list of enabled top-level commands (restricts CLI)" default:"${enabled_commands}"`
+	AccessPolicy   string `help:"Path to access policy file for Gmail filtering" env:"GOG_ACCESS_POLICY" default:"${access_policy}"` //nolint:gosec // env input, not a secret
+	ProxySocket    string `help:"Unix socket path for proxy mode (agent use)" env:"GOG_PROXY_SOCKET"`
+	ProxyNonceFile string `name:"proxy-nonce-file" help:"Path to proxy nonce file" env:"GOG_PROXY_NONCE_FILE"`
 	JSON           bool   `help:"Output JSON to stdout (best for scripting)" default:"${json}" aliases:"machine" short:"j"`
 	Plain          bool   `help:"Output stable, parseable text to stdout (TSV; no colors)" default:"${plain}" aliases:"tsv" short:"p"`
 	ResultsOnly    bool   `name:"results-only" help:"In JSON mode, emit only the primary result (drops envelope fields like nextPageToken)"`
@@ -79,7 +83,8 @@ type CLI struct {
 	Sheets     SheetsCmd             `cmd:"" aliases:"sheet" help:"Google Sheets"`
 	Forms      FormsCmd              `cmd:"" aliases:"form" help:"Google Forms"`
 	AppScript  AppScriptCmd          `cmd:"" name:"appscript" aliases:"script,apps-script" help:"Google Apps Script"`
-	Config     ConfigCmd             `cmd:"" help:"Manage configuration"`
+	Proxy  ProxyCmd  `cmd:"" help:"Proxy for filtered Gmail access (credential isolation)"`
+	Config ConfigCmd `cmd:"" help:"Manage configuration"`
 	ExitCodes  AgentExitCodesCmd     `cmd:"" name:"exit-codes" aliases:"exitcodes" help:"Print stable exit codes (alias for 'agent exit-codes')"`
 	Agent      AgentCmd              `cmd:"" help:"Agent-friendly helpers"`
 	Schema     SchemaCmd             `cmd:"" help:"Machine-readable command/flag schema" aliases:"help-json,helpjson"`
@@ -94,6 +99,27 @@ func Execute(args []string) (err error) {
 	if len(args) == 0 {
 		args = []string{"--help"}
 	}
+
+	// Proxy client intercept: if GOG_PROXY_SOCKET is set, forward the request
+	// to the proxy process before doing anything else (no credential loading).
+	proxySocket := os.Getenv("GOG_PROXY_SOCKET")
+	if proxySocket == "" {
+		// Check if --proxy-socket is in the args
+		for i, a := range args {
+			if a == "--proxy-socket" && i+1 < len(args) {
+				proxySocket = args[i+1]
+				break
+			}
+			if strings.HasPrefix(a, "--proxy-socket=") {
+				proxySocket = strings.TrimPrefix(a, "--proxy-socket=")
+				break
+			}
+		}
+	}
+	if proxySocket != "" {
+		return proxyClientExec(proxySocket, args)
+	}
+
 	args = rewriteDesirePathArgs(args)
 
 	parser, cli, err := newParser(helpDescription())
@@ -154,6 +180,18 @@ func Execute(args []string) (err error) {
 	})
 	ctx = authclient.WithClient(ctx, cli.Client)
 	ctx = authclient.WithAccessToken(ctx, directAccessToken(&cli.RootFlags))
+
+	// Load access policy: proxy-injected policy takes precedence, then file path.
+	if proxyPolicy != nil {
+		ctx = accessctl.WithPolicy(ctx, proxyPolicy)
+	} else if policyPath := strings.TrimSpace(cli.AccessPolicy); policyPath != "" {
+		policy, policyErr := accessctl.LoadPolicy(policyPath)
+		if policyErr != nil {
+			_, _ = fmt.Fprintln(os.Stderr, errfmt.Format(policyErr))
+			return policyErr
+		}
+		ctx = accessctl.WithPolicy(ctx, policy)
+	}
 
 	uiColor := cli.Color
 	if outfmt.IsJSON(ctx) || outfmt.IsPlain(ctx) {
@@ -260,7 +298,8 @@ func isCalendarEventsCommand(args []string) bool {
 
 func globalFlagTakesValue(flag string) bool {
 	switch flag {
-	case "--color", "--account", "--acct", "--client", "--enable-commands", "--select", "--pick", "--project", "-a":
+	case "--color", "--account", "--acct", "--client", "--enable-commands", "--select", "--pick", "--project", "-a",
+		"--access-policy", "--proxy-socket", "--proxy-nonce-file":
 		return true
 	default:
 		return false
@@ -310,6 +349,7 @@ func newParser(description string) (*kong.Kong, *CLI, error) {
 		"calendar_weekday": envOr("GOG_CALENDAR_WEEKDAY", "false"),
 		"client":           envOr("GOG_CLIENT", ""),
 		"enabled_commands": envOr("GOG_ENABLE_COMMANDS", ""),
+		"access_policy":    envOr("GOG_ACCESS_POLICY", ""),
 		"json":             boolString(envMode.JSON),
 		"plain":            boolString(envMode.Plain),
 		"version":          VersionString(),

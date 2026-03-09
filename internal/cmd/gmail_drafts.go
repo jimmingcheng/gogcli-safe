@@ -473,6 +473,11 @@ func (c *GmailDraftsCreateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return validateErr
 	}
 
+	// Enforce access policy on draft recipients
+	if err := enforceGmailWriteAll(ctx, splitCSV(input.To), splitCSV(input.Cc), splitCSV(input.Bcc)); err != nil {
+		return err
+	}
+
 	if dryRunErr := dryRunExit(ctx, flags, "gmail.drafts.create", map[string]any{
 		"to":                  splitCSV(input.To),
 		"cc":                  splitCSV(input.Cc),
@@ -563,6 +568,11 @@ func (c *GmailDraftsUpdateCmd) Run(ctx context.Context, flags *RootFlags) error 
 	}
 	if validateErr := input.validate(); validateErr != nil {
 		return validateErr
+	}
+
+	// Enforce access policy on draft recipients
+	if err := enforceGmailWriteAll(ctx, splitCSV(input.To), splitCSV(input.Cc), splitCSV(input.Bcc)); err != nil {
+		return err
 	}
 
 	if dryRunErr := dryRunExit(ctx, flags, "gmail.drafts.update", map[string]any{

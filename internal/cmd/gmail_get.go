@@ -67,6 +67,10 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
+	if err := enforceGmailRead(ctx, msg); err != nil {
+		return err
+	}
+
 	unsubscribe := bestUnsubscribeLink(msg.Payload)
 	if outfmt.IsJSON(ctx) {
 		// Include a flattened headers map for easier querying

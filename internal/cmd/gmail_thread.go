@@ -82,6 +82,14 @@ func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
+	// Filter thread messages per access policy
+	if gmailPolicy(ctx) != nil && thread != nil {
+		thread = filterGmailThread(ctx, thread)
+		if thread == nil {
+			return fmt.Errorf("access policy: all messages in thread are restricted")
+		}
+	}
+
 	var attachDir string
 	if c.Download {
 		if strings.TrimSpace(c.OutputDir.Dir) == "" {

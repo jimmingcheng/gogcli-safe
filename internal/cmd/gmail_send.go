@@ -164,6 +164,11 @@ func (c *GmailSendCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	bccRecipients := splitCSV(c.Bcc)
 
+	// Enforce access policy on recipients
+	if err := enforceGmailWriteAll(ctx, toRecipients, ccRecipients, bccRecipients); err != nil {
+		return err
+	}
+
 	atts := attachmentsFromPaths(attachPaths)
 
 	var trackingCfg *tracking.Config
