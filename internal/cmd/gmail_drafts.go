@@ -288,41 +288,23 @@ func (c draftComposeInput) validate() error {
 }
 
 func buildDraftMessage(ctx context.Context, svc *gmail.Service, account string, input draftComposeInput) (*gmail.Message, string, error) {
-	fromAddr := account
-	if strings.TrimSpace(input.From) != "" {
-		sa, err := svc.Users.Settings.SendAs.Get("me", input.From).Context(ctx).Do()
-		if err != nil {
-			return nil, "", fmt.Errorf("invalid --from address %q: %w", input.From, err)
-		}
-		if !sendAsAllowedForFrom(sa) {
-			return nil, "", fmt.Errorf("--from address %q is not verified (status: %s)", input.From, sa.VerificationStatus)
-		}
-		fromAddr = input.From
-		if sa.DisplayName != "" {
-			fromAddr = sa.DisplayName + " <" + input.From + ">"
-		}
+	sendAsList, sendAsListErr := listSendAs(ctx, svc)
+	from, err := resolveComposeFrom(ctx, svc, account, input.From, sendAsList, sendAsListErr)
+	if err != nil {
+		return nil, "", err
 	}
 
-	info, err := fetchReplyInfo(ctx, svc, input.ReplyToMessageID, input.ReplyToThreadID, input.Quote)
+	info, body, htmlBody, err := prepareComposeReply(ctx, svc, input.ReplyToMessageID, input.ReplyToThreadID, input.Quote, input.Body, input.BodyHTML)
 	if err != nil {
 		return nil, "", err
 	}
 	inReplyTo := info.InReplyTo
 	references := info.References
 	threadID := info.ThreadID
-	body, htmlBody := applyQuoteToBodies(input.Body, input.BodyHTML, input.Quote, info)
-
-	atts := make([]mailAttachment, 0, len(input.Attach))
-	for _, p := range input.Attach {
-		expanded, expandErr := config.ExpandPath(p)
-		if expandErr != nil {
-			return nil, "", expandErr
-		}
-		atts = append(atts, mailAttachment{Path: expanded})
-	}
+	atts := attachmentsFromPaths(input.Attach)
 
 	raw, err := buildRFC822(mailOptions{
-		From:        fromAddr,
+		From:        from.header,
 		To:          splitCSV(input.To),
 		Cc:          splitCSV(input.Cc),
 		Bcc:         splitCSV(input.Bcc),
@@ -468,13 +450,9 @@ func (c *GmailDraftsCreateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return usage("--quote requires --reply-to-message-id")
 	}
 
-	attachPaths := make([]string, 0, len(c.Attach))
-	for _, p := range c.Attach {
-		expanded, expandErr := config.ExpandPath(p)
-		if expandErr != nil {
-			return expandErr
-		}
-		attachPaths = append(attachPaths, expanded)
+	attachPaths, err := expandComposeAttachmentPaths(c.Attach)
+	if err != nil {
+		return err
 	}
 
 	input := draftComposeInput{
@@ -564,13 +542,9 @@ func (c *GmailDraftsUpdateCmd) Run(ctx context.Context, flags *RootFlags) error 
 	}
 	replyToMessageID := normalizeGmailMessageID(c.ReplyToMessageID)
 
-	attachPaths := make([]string, 0, len(c.Attach))
-	for _, p := range c.Attach {
-		expanded, expandErr := config.ExpandPath(p)
-		if expandErr != nil {
-			return expandErr
-		}
-		attachPaths = append(attachPaths, expanded)
+	attachPaths, err := expandComposeAttachmentPaths(c.Attach)
+	if err != nil {
+		return err
 	}
 
 	input := draftComposeInput{
