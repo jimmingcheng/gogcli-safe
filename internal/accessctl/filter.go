@@ -18,12 +18,18 @@ func FilterMessage(p *Policy, msg *gmail.Message) bool {
 	if len(emails) == 0 {
 		return true // no addresses to check — keep the message
 	}
+
+	sawNonOwner := false
 	for _, email := range emails {
+		if p.IsOwner(email) {
+			continue
+		}
+		sawNonOwner = true
 		if p.IsAllowed(email) {
 			return true
 		}
 	}
-	return false
+	return !sawNonOwner
 }
 
 // FilterThread filters messages within a thread, returning a copy with only

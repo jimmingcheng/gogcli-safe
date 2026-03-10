@@ -18,6 +18,7 @@ const (
 
 // Policy defines an email-address-based access control policy for Gmail.
 type Policy struct {
+	Owner     string
 	Mode      Mode
 	Addresses map[string]bool // normalized lowercase emails
 	Domains   map[string]bool // e.g. "example.com"
@@ -55,6 +56,18 @@ func (p *Policy) matchesEntry(email string) bool {
 		return true
 	}
 	return false
+}
+
+// IsOwner returns true if the given email matches the policy owner account.
+func (p *Policy) IsOwner(email string) bool {
+	if p == nil {
+		return false
+	}
+	owner := normalizeEmail(p.Owner)
+	if owner == "" {
+		return false
+	}
+	return normalizeEmail(email) == owner
 }
 
 // FilterAddressList takes an RFC 5322 address list header value and returns
@@ -127,7 +140,12 @@ func (pf *PolicyFile) ForAccount(account string) *Policy {
 	if pf == nil {
 		return nil
 	}
-	return pf.Accounts[strings.ToLower(strings.TrimSpace(account))]
+	account = strings.ToLower(strings.TrimSpace(account))
+	p := pf.Accounts[account]
+	if p == nil {
+		return nil
+	}
+	return p.withOwner(account)
 }
 
 // accountPolicy is the per-account JSON shape inside the policy file.
@@ -327,4 +345,29 @@ func domainOf(email string) string {
 		return ""
 	}
 	return email[at+1:]
+}
+
+func (p *Policy) withOwner(owner string) *Policy {
+	if p == nil {
+		return nil
+	}
+
+	return &Policy{
+		Owner:     normalizeEmail(owner),
+		Mode:      p.Mode,
+		Addresses: cloneStringSet(p.Addresses),
+		Domains:   cloneStringSet(p.Domains),
+	}
+}
+
+func cloneStringSet(in map[string]bool) map[string]bool {
+	if len(in) == 0 {
+		return map[string]bool{}
+	}
+
+	out := make(map[string]bool, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

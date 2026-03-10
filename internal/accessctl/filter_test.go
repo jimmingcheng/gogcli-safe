@@ -38,16 +38,17 @@ func TestFilterMessage_AllowMode(t *testing.T) {
 
 func TestFilterMessage_DenyMode(t *testing.T) {
 	p := &Policy{
+		Owner:     "me@gmail.com",
 		Mode:      ModeDeny,
 		Addresses: map[string]bool{"spam@evil.com": true},
 		Domains:   map[string]bool{},
 	}
 
-	// Message from denied sender — hide (all participants denied)
-	assert.False(t, FilterMessage(p, makeMessage("spam@evil.com", "spam@evil.com")))
+	// Message from denied sender to the account owner — hide.
+	assert.False(t, FilterMessage(p, makeMessage("spam@evil.com", "me@gmail.com")))
 
-	// Message from denied sender to allowed — keep (to is allowed)
-	assert.True(t, FilterMessage(p, makeMessage("spam@evil.com", "alice@example.com")))
+	// Message from denied sender to allowed participant — keep.
+	assert.True(t, FilterMessage(p, makeMessage("spam@evil.com", "alice@example.com, me@gmail.com")))
 
 	// Message from allowed sender — keep
 	assert.True(t, FilterMessage(p, makeMessage("alice@example.com", "bob@work.com")))

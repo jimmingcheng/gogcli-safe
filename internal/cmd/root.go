@@ -83,8 +83,8 @@ type CLI struct {
 	Sheets     SheetsCmd             `cmd:"" aliases:"sheet" help:"Google Sheets"`
 	Forms      FormsCmd              `cmd:"" aliases:"form" help:"Google Forms"`
 	AppScript  AppScriptCmd          `cmd:"" name:"appscript" aliases:"script,apps-script" help:"Google Apps Script"`
-	Proxy  ProxyCmd  `cmd:"" help:"Proxy for filtered Gmail access (credential isolation)"`
-	Config ConfigCmd `cmd:"" help:"Manage configuration"`
+	Proxy      ProxyCmd              `cmd:"" help:"Proxy for filtered Gmail access (credential isolation)"`
+	Config     ConfigCmd             `cmd:"" help:"Manage configuration"`
 	ExitCodes  AgentExitCodesCmd     `cmd:"" name:"exit-codes" aliases:"exitcodes" help:"Print stable exit codes (alias for 'agent exit-codes')"`
 	Agent      AgentCmd              `cmd:"" help:"Agent-friendly helpers"`
 	Schema     SchemaCmd             `cmd:"" help:"Machine-readable command/flag schema" aliases:"help-json,helpjson"`
@@ -185,6 +185,11 @@ func Execute(args []string) (err error) {
 	if proxyPolicy != nil {
 		ctx = accessctl.WithPolicy(ctx, proxyPolicy)
 	} else if policyPath := strings.TrimSpace(cli.AccessPolicy); policyPath != "" {
+		policyPath, err = resolveAccessPolicyPath(&cli.RootFlags)
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, errfmt.Format(err))
+			return err
+		}
 		account := strings.TrimSpace(cli.Account)
 		if account == "" {
 			account = strings.TrimSpace(os.Getenv("GOG_ACCOUNT"))

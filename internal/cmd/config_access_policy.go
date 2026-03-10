@@ -27,9 +27,9 @@ type AccessPolicyShowCmd struct {
 	Account string `name:"policy-account" help:"Show policy for a specific account (omit to show all)"`
 }
 
-func (c *AccessPolicyShowCmd) Run(ctx context.Context) error {
+func (c *AccessPolicyShowCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
-	path, err := accessctl.DefaultPolicyPath()
+	path, err := resolveAccessPolicyPath(flags)
 	if err != nil {
 		return err
 	}
@@ -140,7 +140,7 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	account := strings.ToLower(strings.TrimSpace(c.Account))
 	if account == "" {
-		return usage("--account is required")
+		return usage("--policy-account is required")
 	}
 
 	mode := accessctl.Mode(strings.ToLower(strings.TrimSpace(c.Mode)))
@@ -179,13 +179,13 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
-	pf, err := loadOrCreatePolicyFile()
+	pf, err := loadOrCreatePolicyFile(flags)
 	if err != nil {
 		return err
 	}
 	pf.Accounts[account] = policy
 
-	if err := writePolicyFile(pf); err != nil {
+	if err := writePolicyFile(flags, pf); err != nil {
 		return err
 	}
 
@@ -212,7 +212,7 @@ func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	account := strings.ToLower(strings.TrimSpace(c.Account))
 	if account == "" {
-		return usage("--account is required")
+		return usage("--policy-account is required")
 	}
 
 	addr := strings.ToLower(strings.TrimSpace(c.Address))
@@ -221,7 +221,7 @@ func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return usage("specify --address or --domain")
 	}
 
-	pf, err := loadOrCreatePolicyFile()
+	pf, err := loadOrCreatePolicyFile(flags)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
-	if err := writePolicyFile(pf); err != nil {
+	if err := writePolicyFile(flags, pf); err != nil {
 		return err
 	}
 
@@ -274,7 +274,7 @@ func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error
 
 	account := strings.ToLower(strings.TrimSpace(c.Account))
 	if account == "" {
-		return usage("--account is required")
+		return usage("--policy-account is required")
 	}
 
 	addr := strings.ToLower(strings.TrimSpace(c.Address))
@@ -283,7 +283,7 @@ func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error
 		return usage("specify --address or --domain")
 	}
 
-	pf, err := loadOrCreatePolicyFile()
+	pf, err := loadOrCreatePolicyFile(flags)
 	if err != nil {
 		return err
 	}
@@ -308,7 +308,7 @@ func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error
 		return err
 	}
 
-	if err := writePolicyFile(pf); err != nil {
+	if err := writePolicyFile(flags, pf); err != nil {
 		return err
 	}
 
@@ -330,7 +330,7 @@ type AccessPolicyTestCmd struct {
 	Email   string `arg:"" name:"email" help:"Email address to test"`
 }
 
-func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
+func (c *AccessPolicyTestCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
 	email := strings.TrimSpace(c.Email)
 	if email == "" {
@@ -339,10 +339,10 @@ func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
 
 	account := strings.ToLower(strings.TrimSpace(c.Account))
 	if account == "" {
-		return usage("--account is required")
+		return usage("--policy-account is required")
 	}
 
-	path, err := accessctl.DefaultPolicyPath()
+	path, err := resolveAccessPolicyPath(flags)
 	if err != nil {
 		return err
 	}
@@ -398,8 +398,8 @@ func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
 	return nil
 }
 
-func loadOrCreatePolicyFile() (*accessctl.PolicyFile, error) {
-	path, err := accessctl.DefaultPolicyPath()
+func loadOrCreatePolicyFile(flags *RootFlags) (*accessctl.PolicyFile, error) {
+	path, err := resolveAccessPolicyPath(flags)
 	if err != nil {
 		return nil, err
 	}
@@ -415,8 +415,8 @@ func loadOrCreatePolicyFile() (*accessctl.PolicyFile, error) {
 	return pf, nil
 }
 
-func writePolicyFile(pf *accessctl.PolicyFile) error {
-	path, err := accessctl.DefaultPolicyPath()
+func writePolicyFile(flags *RootFlags, pf *accessctl.PolicyFile) error {
+	path, err := resolveAccessPolicyPath(flags)
 	if err != nil {
 		return err
 	}

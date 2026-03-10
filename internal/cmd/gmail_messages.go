@@ -40,7 +40,6 @@ func (c *GmailMessagesSearchCmd) Run(ctx context.Context, flags *RootFlags) erro
 	if query == "" {
 		return usage("missing query")
 	}
-	query = augmentGmailQuery(ctx, query)
 
 	svc, err := newGmailService(ctx, account)
 	if err != nil {
@@ -108,7 +107,6 @@ func (c *GmailMessagesSearchCmd) Run(ctx context.Context, flags *RootFlags) erro
 	if err != nil {
 		return err
 	}
-	items = filterMessageItems(ctx, items)
 
 	if outfmt.IsJSON(ctx) {
 		if writeErr := outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
@@ -262,12 +260,16 @@ func fetchMessageDetails(ctx context.Context, svc *gmail.Service, messages []*gm
 				call = call.Format("full")
 			} else {
 				call = call.Format("metadata").
-					MetadataHeaders("From", "Subject", "Date").
+					MetadataHeaders("From", "To", "Cc", "Bcc", "Subject", "Date").
 					Fields("id,threadId,labelIds,payload(headers)")
 			}
 			msg, err := call.Context(ctx).Do()
 			if err != nil {
 				results <- result{index: idx, messageID: messageID, err: fmt.Errorf("message %s: %w", messageID, err)}
+				return
+			}
+			if !isGmailReadAllowed(ctx, msg) {
+				results <- result{index: idx, messageID: messageID}
 				return
 			}
 

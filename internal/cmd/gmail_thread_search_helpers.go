@@ -240,11 +240,18 @@ func fetchThreadDetails(ctx context.Context, svc *gmail.Service, threads []*gmai
 
 			fullThread, err := svc.Users.Threads.Get("me", threadID).
 				Format("metadata").
-				MetadataHeaders("From", "Subject", "Date").
+				MetadataHeaders("From", "To", "Cc", "Bcc", "Subject", "Date").
 				Context(ctx).
 				Do()
 			if err != nil {
 				results <- result{index: idx, err: err}
+				return
+			}
+
+			if filtered := filterGmailThread(ctx, fullThread); filtered != nil {
+				fullThread = filtered
+			} else {
+				results <- result{index: idx}
 				return
 			}
 

@@ -53,6 +53,10 @@ func (c *GmailDraftsListCmd) Run(ctx context.Context, flags *RootFlags) error {
 	if err != nil {
 		return err
 	}
+	drafts, err = filterDraftsByPolicy(ctx, svc, drafts)
+	if err != nil {
+		return err
+	}
 	if outfmt.IsJSON(ctx) {
 		type item struct {
 			ID        string `json:"id"`
@@ -95,6 +99,38 @@ func (c *GmailDraftsListCmd) Run(ctx context.Context, flags *RootFlags) error {
 	return nil
 }
 
+func filterDraftsByPolicy(ctx context.Context, svc *gmail.Service, drafts []*gmail.Draft) ([]*gmail.Draft, error) {
+	if gmailPolicy(ctx) == nil || len(drafts) == 0 {
+		return drafts, nil
+	}
+
+	kept := make([]*gmail.Draft, 0, len(drafts))
+	for _, draft := range drafts {
+		if draft == nil || strings.TrimSpace(draft.Id) == "" {
+			continue
+		}
+
+		fullDraft, err := loadDraftMetadata(ctx, svc, draft.Id)
+		if err != nil {
+			return nil, err
+		}
+		if err := enforceGmailDraftAccess(ctx, fullDraft); err != nil {
+			continue
+		}
+		kept = append(kept, fullDraft)
+	}
+
+	return kept, nil
+}
+
+func loadDraftMetadata(ctx context.Context, svc *gmail.Service, draftID string) (*gmail.Draft, error) {
+	return svc.Users.Drafts.Get("me", draftID).
+		Format("full").
+		Fields("id,message(id,threadId,payload(headers))").
+		Context(ctx).
+		Do()
+}
+
 type GmailDraftsGetCmd struct {
 	DraftID  string `arg:"" name:"draftId" help:"Draft ID"`
 	Download bool   `name:"download" help:"Download draft attachments"`
@@ -114,6 +150,9 @@ func (c *GmailDraftsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	draft, err := svc.Users.Drafts.Get("me", draftID).Format("full").Do()
 	if err != nil {
+		return err
+	}
+	if err := enforceGmailDraftAccess(ctx, draft); err != nil {
 		return err
 	}
 	if draft.Message == nil {
@@ -219,14 +258,20 @@ func (c *GmailDraftsSendCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return usage("empty draftId")
 	}
 
+	_, svc, err := requireGmailService(ctx, flags)
+	if err != nil {
+		return err
+	}
+	draft, err := loadDraftMetadata(ctx, svc, draftID)
+	if err != nil {
+		return err
+	}
+	if err := enforceGmailDraftAccess(ctx, draft); err != nil {
+		return err
+	}
 	if err := dryRunExit(ctx, flags, "gmail.drafts.send", map[string]any{
 		"draft_id": draftID,
 	}); err != nil {
-		return err
-	}
-
-	_, svc, err := requireGmailService(ctx, flags)
-	if err != nil {
 		return err
 	}
 
@@ -570,29 +615,6 @@ func (c *GmailDraftsUpdateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return validateErr
 	}
 
-	// Enforce access policy on draft recipients
-	if err := enforceGmailWriteAll(ctx, splitCSV(input.To), splitCSV(input.Cc), splitCSV(input.Bcc)); err != nil {
-		return err
-	}
-
-	if dryRunErr := dryRunExit(ctx, flags, "gmail.drafts.update", map[string]any{
-		"draft_id":            draftID,
-		"to_keep_existing":    !toWasSet,
-		"to":                  splitCSV(input.To),
-		"cc":                  splitCSV(input.Cc),
-		"bcc":                 splitCSV(input.Bcc),
-		"subject":             strings.TrimSpace(input.Subject),
-		"body_len":            len(strings.TrimSpace(input.Body)),
-		"body_html_len":       len(strings.TrimSpace(input.BodyHTML)),
-		"reply_to_message_id": strings.TrimSpace(input.ReplyToMessageID),
-		"reply_to":            strings.TrimSpace(input.ReplyTo),
-		"quote":               input.Quote,
-		"from":                strings.TrimSpace(input.From),
-		"attachments":         attachPaths,
-	}); dryRunErr != nil {
-		return dryRunErr
-	}
-
 	account, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
@@ -618,6 +640,29 @@ func (c *GmailDraftsUpdateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		to = existingTo
 	}
 
+	input.To = to
+	if err := enforceGmailWriteAll(ctx, splitCSV(input.To), splitCSV(input.Cc), splitCSV(input.Bcc)); err != nil {
+		return err
+	}
+
+	if dryRunErr := dryRunExit(ctx, flags, "gmail.drafts.update", map[string]any{
+		"draft_id":            draftID,
+		"to_keep_existing":    !toWasSet,
+		"to":                  splitCSV(input.To),
+		"cc":                  splitCSV(input.Cc),
+		"bcc":                 splitCSV(input.Bcc),
+		"subject":             strings.TrimSpace(input.Subject),
+		"body_len":            len(strings.TrimSpace(input.Body)),
+		"body_html_len":       len(strings.TrimSpace(input.BodyHTML)),
+		"reply_to_message_id": strings.TrimSpace(input.ReplyToMessageID),
+		"reply_to":            strings.TrimSpace(input.ReplyTo),
+		"quote":               input.Quote,
+		"from":                strings.TrimSpace(input.From),
+		"attachments":         attachPaths,
+	}); dryRunErr != nil {
+		return dryRunErr
+	}
+
 	replyToThreadID := ""
 	if c.Quote && strings.TrimSpace(replyToMessageID) == "" {
 		resolvedMessageID, resolveErr := resolveQuoteReplyTargetMessageID(ctx, svc, existingThreadID, account, existingMessageID)
@@ -633,7 +678,6 @@ func (c *GmailDraftsUpdateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return usage("--quote requires --reply-to-message-id or existing draft thread")
 	}
 
-	input.To = to
 	input.ReplyToMessageID = replyToMessageID
 	input.ReplyToThreadID = replyToThreadID
 

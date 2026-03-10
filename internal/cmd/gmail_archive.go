@@ -58,8 +58,6 @@ func (c *GmailUnreadCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 // gmailBulkLabelOp handles the common pattern: resolve IDs (from args or query), then batch modify labels.
 func gmailBulkLabelOp(ctx context.Context, flags *RootFlags, messageIDs []string, query string, limit int64, addLabels, removeLabels []string, verb string, dryRunOp string) error { //nolint:cyclop // intentional single-path
-	// Augment search query with access policy restrictions
-	query = augmentGmailQuery(ctx, query)
 	u := ui.FromContext(ctx)
 
 	idsFromArgs := make([]string, 0, len(messageIDs))
@@ -104,6 +102,10 @@ func gmailBulkLabelOp(ctx context.Context, flags *RootFlags, messageIDs []string
 		}
 	}
 	ids = append(ids, idsFromArgs...)
+	ids, err = filterAllowedMessageIDs(ctx, svc, ids)
+	if err != nil {
+		return err
+	}
 
 	if len(ids) == 0 {
 		if outfmt.IsJSON(ctx) {

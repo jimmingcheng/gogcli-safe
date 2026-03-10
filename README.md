@@ -1,13 +1,13 @@
 # gogcli-safe
 
-A fork of [steipete/gogcli](https://github.com/steipete/gogcli) that adds **Gmail access control** and a **credential-isolating proxy** for safe use by AI agents and automated workflows.
+A fork of [steipete/gogcli](https://github.com/steipete/gogcli) that adds **Gmail access control** and a **credential-isolating proxy** for safe Gmail use by AI agents and automated workflows.
 
 The upstream `gogcli` is a fast, script-friendly CLI for Gmail, Calendar, Drive, Docs, Sheets, and many more Google APIs. This fork keeps all of that and adds a security layer so you can hand Gmail access to an untrusted process (like an LLM agent) without giving it unrestricted access to your full inbox or credentials.
 
 ## What this fork adds
 
 - **Per-account access policies** — allow/deny rules by email address and domain, keyed per Google account, that filter all Gmail operations (search, read, send, drafts)
-- **Proxy server** — a Unix socket proxy that holds credentials in a separate process, so the agent process never sees your OAuth tokens
+- **Proxy server** — a Unix socket proxy that holds credentials in a separate process, so the agent process never sees your OAuth tokens while Gmail stays policy-filtered
 - **Nonce authentication** — the proxy validates each request with a one-time nonce to prevent unauthorized socket connections
 - **Policy management CLI** — `gog config access-policy` commands to create, inspect, and test policies
 
@@ -38,50 +38,50 @@ When a policy is active, it affects every Gmail operation:
 
 | Operation | Effect |
 |-----------|--------|
-| `gmail search` / `gmail messages` | Query is augmented to include/exclude addresses; results are filtered |
+| `gmail search` / `gmail messages` | Results are filtered using participant-aware access checks |
 | `gmail get` | Blocked if message involves restricted addresses |
 | `gmail thread get` | Messages with restricted addresses are removed from the thread |
 | `gmail send` | Blocked if any recipient (to/cc/bcc) is restricted |
-| `gmail drafts` | Filtered the same as search and thread operations |
+| `gmail drafts` | List/get/send/update re-check stored draft recipients before exposing or sending |
 
 ### Managing policies
 
-All policy management commands require `--account` to specify which account to operate on:
+All policy management commands require `--policy-account` to specify which account to operate on. The dedicated flag avoids colliding with the global `--account` flag used for normal command execution:
 
 ```bash
 # Create an allow-only policy for a personal account
-gog config access-policy set --account you@gmail.com --mode allow \
+gog config access-policy set --policy-account you@gmail.com --mode allow \
   --addresses "alice@example.com,bob@work.com" \
   --domains "trusted-corp.com"
 
 # Create a deny policy for a work account
-gog config access-policy set --account work@company.com --mode deny \
+gog config access-policy set --policy-account work@company.com --mode deny \
   --domains "spam.com"
 
 # Add an address to an existing account's policy
-gog config access-policy add --account you@gmail.com --address "carol@example.com"
+gog config access-policy add --policy-account you@gmail.com --address "carol@example.com"
 
 # Add a domain
-gog config access-policy add --account you@gmail.com --domain "another-trusted.org"
+gog config access-policy add --policy-account you@gmail.com --domain "another-trusted.org"
 
 # Remove an entry
-gog config access-policy remove --account you@gmail.com --address "bob@work.com"
+gog config access-policy remove --policy-account you@gmail.com --address "bob@work.com"
 
 # View all accounts' policies
 gog config access-policy show
 
 # View a specific account's policy
-gog config access-policy show --account you@gmail.com
+gog config access-policy show --policy-account you@gmail.com
 
 # Test whether an address is allowed for an account
-gog config access-policy test --account you@gmail.com alice@example.com
+gog config access-policy test --policy-account you@gmail.com alice@example.com
 # → alice@example.com: allowed (allow mode)
 
-gog config access-policy test --account you@gmail.com stranger@unknown.com
+gog config access-policy test --policy-account you@gmail.com stranger@unknown.com
 # → stranger@unknown.com: BLOCKED (allow mode)
 
 # Test an unlisted account — always allowed (unrestricted)
-gog config access-policy test --account unlisted@other.com anything@example.com
+gog config access-policy test --policy-account unlisted@other.com anything@example.com
 # → anything@example.com: allowed (no policy for account)
 ```
 
@@ -124,6 +124,8 @@ gog gmail search inbox
 ## Proxy Mode
 
 The proxy separates credentials from the process that runs commands. A trusted **server** process holds your OAuth tokens and access policy; an untrusted **client** process sends commands over a Unix socket.
+
+This is a **safe Gmail proxy**, not a general capability sandbox. Gmail commands are filtered by the access policy. Non-Gmail commands like Calendar, Drive, Docs, Sheets, and Contacts still run with the account's normal permissions.
 
 ```
 Agent / untrusted process          Proxy server (trusted)
@@ -175,6 +177,8 @@ gog --json gmail messages search "newer_than:7d" --max 10
 
 The client reads the nonce from disk, sends it with the command over the socket, and displays the server's response. The agent process never has access to OAuth tokens.
 
+Gmail commands are policy-filtered on the server side. Non-Gmail commands are simply forwarded and use whatever scopes and permissions that account already has.
+
 ### Proxy security
 
 The proxy blocks commands and flags that could compromise security:
@@ -195,7 +199,7 @@ Set up an agent that can only interact with specific contacts:
 
 ```bash
 # 1. Create the policy for your account
-gog config access-policy set --account you@gmail.com --mode allow \
+gog config access-policy set --policy-account you@gmail.com --mode allow \
   --addresses "teammate@company.com,manager@company.com" \
   --domains "company.com"
 
@@ -207,9 +211,9 @@ gog proxy serve --account you@gmail.com \
 export GOG_PROXY_SOCKET=~/.config/gogcli-safe/proxy.sock
 export GOG_PROXY_NONCE_FILE=~/.config/gogcli-safe/proxy.nonce
 
-# Agent can search — query is automatically augmented with policy
+# Agent can search — results are filtered by policy
 gog gmail search inbox
-# Only returns threads involving @company.com addresses
+# Only returns threads whose visible participants match the policy
 
 # Agent can read allowed threads
 gog gmail thread get <threadId>

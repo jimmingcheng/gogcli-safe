@@ -30,6 +30,7 @@ func TestParsePolicyFile(t *testing.T) {
 
 	alice := pf.ForAccount("alice@gmail.com")
 	require.NotNil(t, alice)
+	assert.Equal(t, "alice@gmail.com", alice.Owner)
 	assert.Equal(t, ModeAllow, alice.Mode)
 	assert.True(t, alice.Addresses["bob@example.com"])
 	assert.True(t, alice.Addresses["carol@work.com"])
