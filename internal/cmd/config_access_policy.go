@@ -24,7 +24,7 @@ type AccessPolicyCmd struct {
 }
 
 type AccessPolicyShowCmd struct {
-	Account string `name:"account" help:"Show policy for a specific account (omit to show all)"`
+	Account string `name:"policy-account" help:"Show policy for a specific account (omit to show all)"`
 }
 
 func (c *AccessPolicyShowCmd) Run(ctx context.Context) error {
@@ -129,7 +129,7 @@ func (c *AccessPolicyShowCmd) Run(ctx context.Context) error {
 }
 
 type AccessPolicySetCmd struct {
-	Account   string `name:"account" required:"" help:"Account email to set policy for"`
+	Account   string `name:"policy-account" required:"" help:"Account email to set policy for"`
 	Mode      string `name:"mode" required:"" help:"Policy mode: allow or deny"`
 	Addresses string `name:"addresses" help:"Comma-separated email addresses"`
 	Domains   string `name:"domains" help:"Comma-separated domain names"`
@@ -202,7 +202,7 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 }
 
 type AccessPolicyAddCmd struct {
-	Account string `name:"account" required:"" help:"Account email to modify"`
+	Account string `name:"policy-account" required:"" help:"Account email to modify"`
 	Address string `name:"address" help:"Email address to add"`
 	Domain  string `name:"domain" help:"Domain to add"`
 }
@@ -264,7 +264,7 @@ func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 }
 
 type AccessPolicyRemoveCmd struct {
-	Account string `name:"account" required:"" help:"Account email to modify"`
+	Account string `name:"policy-account" required:"" help:"Account email to modify"`
 	Address string `name:"address" help:"Email address to remove"`
 	Domain  string `name:"domain" help:"Domain to remove"`
 }
@@ -326,7 +326,7 @@ func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error
 }
 
 type AccessPolicyTestCmd struct {
-	Account string `name:"account" required:"" help:"Account email to test against"`
+	Account string `name:"policy-account" required:"" help:"Account email to test against"`
 	Email   string `arg:"" name:"email" help:"Email address to test"`
 }
 
