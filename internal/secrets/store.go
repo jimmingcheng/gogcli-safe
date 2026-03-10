@@ -42,7 +42,7 @@ func keyringItem(key string, data []byte) keyring.Item {
 	return keyring.Item{
 		Key:   key,
 		Data:  data,
-		Label: config.AppName, // to show "gogcli" in security dialog instead of "" (empty string)
+		Label: config.AppName, // to show "gogcli-safe" in security dialog instead of "" (empty string)
 	}
 }
 

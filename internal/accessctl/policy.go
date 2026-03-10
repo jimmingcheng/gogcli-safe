@@ -115,28 +115,58 @@ func (p *Policy) ContainsRestricted(emails ...string) bool {
 	return false
 }
 
-// policyFile is the JSON config file format.
-type policyFile struct {
-	Gmail *gmailPolicy `json:"gmail"`
+// PolicyFile is the parsed multi-account policy file. Accounts not present
+// in the map are unrestricted (nil policy).
+type PolicyFile struct {
+	Accounts map[string]*Policy // keyed by lowercase email
 }
 
-type gmailPolicy struct {
+// ForAccount returns the policy for the given account, or nil if the account
+// is not listed (meaning unrestricted).
+func (pf *PolicyFile) ForAccount(account string) *Policy {
+	if pf == nil {
+		return nil
+	}
+	return pf.Accounts[strings.ToLower(strings.TrimSpace(account))]
+}
+
+// accountPolicy is the per-account JSON shape inside the policy file.
+type accountPolicy struct {
 	Mode      string   `json:"mode"`
 	Addresses []string `json:"addresses"`
 	Domains   []string `json:"domains"`
 }
 
-// LoadPolicy reads a policy file from disk and returns the Gmail policy.
-func LoadPolicy(path string) (*Policy, error) {
+// policyFile is the JSON config file format (multi-account).
+type policyFile struct {
+	Gmail *gmailSection `json:"gmail"`
+}
+
+type gmailSection struct {
+	Accounts map[string]*accountPolicy `json:"accounts"`
+}
+
+// LoadPolicyFile reads a policy file from disk and returns the full PolicyFile.
+func LoadPolicyFile(path string) (*PolicyFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read access policy: %w", err)
 	}
-	return ParsePolicy(data)
+	return ParsePolicyFile(data)
 }
 
-// ParsePolicy parses a policy from JSON bytes.
-func ParsePolicy(data []byte) (*Policy, error) {
+// LoadAccountPolicy reads a policy file and extracts the policy for a single account.
+// Returns nil (unrestricted) if the account is empty or not listed.
+func LoadAccountPolicy(path, account string) (*Policy, error) {
+	pf, err := LoadPolicyFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return pf.ForAccount(account), nil
+}
+
+// ParsePolicyFile parses a multi-account policy file from JSON bytes.
+func ParsePolicyFile(data []byte) (*PolicyFile, error) {
 	var pf policyFile
 	if err := json.Unmarshal(data, &pf); err != nil {
 		return nil, fmt.Errorf("parse access policy: %w", err)
@@ -144,22 +174,52 @@ func ParsePolicy(data []byte) (*Policy, error) {
 	if pf.Gmail == nil {
 		return nil, fmt.Errorf("access policy: missing \"gmail\" section")
 	}
-
-	mode := Mode(strings.ToLower(strings.TrimSpace(pf.Gmail.Mode)))
-	if mode != ModeAllow && mode != ModeDeny {
-		return nil, fmt.Errorf("access policy: mode must be \"allow\" or \"deny\", got %q", pf.Gmail.Mode)
+	if pf.Gmail.Accounts == nil {
+		return nil, fmt.Errorf("access policy: missing \"gmail.accounts\" section")
 	}
 
-	addresses := make(map[string]bool, len(pf.Gmail.Addresses))
-	for _, addr := range pf.Gmail.Addresses {
+	result := &PolicyFile{Accounts: make(map[string]*Policy, len(pf.Gmail.Accounts))}
+	for acct, ap := range pf.Gmail.Accounts {
+		acct = strings.ToLower(strings.TrimSpace(acct))
+		if acct == "" || ap == nil {
+			continue
+		}
+		p, err := parseAccountPolicy(ap)
+		if err != nil {
+			return nil, fmt.Errorf("access policy for %s: %w", acct, err)
+		}
+		result.Accounts[acct] = p
+	}
+
+	return result, nil
+}
+
+// ParseAccountPolicy parses a multi-account file and extracts one account's policy.
+// Returns nil (unrestricted) if the account is empty or not listed.
+func ParseAccountPolicy(data []byte, account string) (*Policy, error) {
+	pf, err := ParsePolicyFile(data)
+	if err != nil {
+		return nil, err
+	}
+	return pf.ForAccount(account), nil
+}
+
+func parseAccountPolicy(ap *accountPolicy) (*Policy, error) {
+	mode := Mode(strings.ToLower(strings.TrimSpace(ap.Mode)))
+	if mode != ModeAllow && mode != ModeDeny {
+		return nil, fmt.Errorf("mode must be \"allow\" or \"deny\", got %q", ap.Mode)
+	}
+
+	addresses := make(map[string]bool, len(ap.Addresses))
+	for _, addr := range ap.Addresses {
 		normalized := normalizeEmail(addr)
 		if normalized != "" {
 			addresses[normalized] = true
 		}
 	}
 
-	domains := make(map[string]bool, len(pf.Gmail.Domains))
-	for _, d := range pf.Gmail.Domains {
+	domains := make(map[string]bool, len(ap.Domains))
+	for _, d := range ap.Domains {
 		d = strings.ToLower(strings.TrimSpace(d))
 		if d != "" {
 			domains[d] = true
@@ -173,31 +233,41 @@ func ParsePolicy(data []byte) (*Policy, error) {
 	}, nil
 }
 
-// MarshalPolicy returns the JSON representation of a policy.
-func MarshalPolicy(p *Policy) ([]byte, error) {
-	if p == nil {
-		return nil, fmt.Errorf("nil policy")
+// MarshalPolicyFile returns the JSON representation of a full multi-account policy file.
+func MarshalPolicyFile(pf *PolicyFile) ([]byte, error) {
+	if pf == nil {
+		return nil, fmt.Errorf("nil policy file")
 	}
 
-	addresses := make([]string, 0, len(p.Addresses))
-	for addr := range p.Addresses {
-		addresses = append(addresses, addr)
-	}
+	accounts := make(map[string]*accountPolicy, len(pf.Accounts))
+	for acct, p := range pf.Accounts {
+		if p == nil {
+			continue
+		}
+		addresses := make([]string, 0, len(p.Addresses))
+		for addr := range p.Addresses {
+			addresses = append(addresses, addr)
+		}
 
-	domainList := make([]string, 0, len(p.Domains))
-	for d := range p.Domains {
-		domainList = append(domainList, d)
-	}
+		domainList := make([]string, 0, len(p.Domains))
+		for d := range p.Domains {
+			domainList = append(domainList, d)
+		}
 
-	pf := policyFile{
-		Gmail: &gmailPolicy{
+		accounts[acct] = &accountPolicy{
 			Mode:      string(p.Mode),
 			Addresses: addresses,
 			Domains:   domainList,
+		}
+	}
+
+	raw := policyFile{
+		Gmail: &gmailSection{
+			Accounts: accounts,
 		},
 	}
 
-	return json.MarshalIndent(pf, "", "  ")
+	return json.MarshalIndent(raw, "", "  ")
 }
 
 func normalizeEmail(email string) string {

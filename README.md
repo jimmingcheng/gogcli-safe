@@ -6,7 +6,7 @@ The upstream `gogcli` is a fast, script-friendly CLI for Gmail, Calendar, Drive,
 
 ## What this fork adds
 
-- **Access policies** — allow/deny rules by email address and domain that filter all Gmail operations (search, read, send, drafts)
+- **Per-account access policies** — allow/deny rules by email address and domain, keyed per Google account, that filter all Gmail operations (search, read, send, drafts)
 - **Proxy server** — a Unix socket proxy that holds credentials in a separate process, so the agent process never sees your OAuth tokens
 - **Nonce authentication** — the proxy validates each request with a one-time nonce to prevent unauthorized socket connections
 - **Policy management CLI** — `gog config access-policy` commands to create, inspect, and test policies
@@ -27,7 +27,9 @@ The binary is at `./bin/gog`. For initial setup (OAuth credentials, account auth
 
 ## Access Policies
 
-An access policy restricts which email addresses a Gmail session can interact with. Policies operate in one of two modes:
+An access policy restricts which email addresses a Gmail session can interact with. Policies are **per-account** — each Google account can have independent allow/deny rules. Accounts not listed in the policy file are unrestricted.
+
+Policies operate in one of two modes:
 
 - **allow** (whitelist) — only listed addresses/domains are permitted
 - **deny** (blacklist) — listed addresses/domains are blocked; everything else is permitted
@@ -44,54 +46,78 @@ When a policy is active, it affects every Gmail operation:
 
 ### Managing policies
 
+All policy management commands require `--account` to specify which account to operate on:
+
 ```bash
-# Create an allow-only policy
-gog config access-policy set --mode allow \
+# Create an allow-only policy for a personal account
+gog config access-policy set --account you@gmail.com --mode allow \
   --addresses "alice@example.com,bob@work.com" \
   --domains "trusted-corp.com"
 
-# Add an address to an existing policy
-gog config access-policy add --address "carol@example.com"
+# Create a deny policy for a work account
+gog config access-policy set --account work@company.com --mode deny \
+  --domains "spam.com"
+
+# Add an address to an existing account's policy
+gog config access-policy add --account you@gmail.com --address "carol@example.com"
 
 # Add a domain
-gog config access-policy add --domain "another-trusted.org"
+gog config access-policy add --account you@gmail.com --domain "another-trusted.org"
 
 # Remove an entry
-gog config access-policy remove --address "bob@work.com"
+gog config access-policy remove --account you@gmail.com --address "bob@work.com"
 
-# View current policy
+# View all accounts' policies
 gog config access-policy show
 
-# Test whether an address is allowed
-gog config access-policy test alice@example.com
+# View a specific account's policy
+gog config access-policy show --account you@gmail.com
+
+# Test whether an address is allowed for an account
+gog config access-policy test --account you@gmail.com alice@example.com
 # → alice@example.com: allowed (allow mode)
 
-gog config access-policy test stranger@unknown.com
+gog config access-policy test --account you@gmail.com stranger@unknown.com
 # → stranger@unknown.com: BLOCKED (allow mode)
+
+# Test an unlisted account — always allowed (unrestricted)
+gog config access-policy test --account unlisted@other.com anything@example.com
+# → anything@example.com: allowed (no policy for account)
 ```
 
-The policy file is stored at `~/.config/gogcli/access-policy.json`:
+The policy file is stored at `~/.config/gogcli-safe/access-policy.json`:
 
 ```json
 {
   "gmail": {
-    "mode": "allow",
-    "addresses": ["alice@example.com", "carol@example.com"],
-    "domains": ["trusted-corp.com", "another-trusted.org"]
+    "accounts": {
+      "you@gmail.com": {
+        "mode": "allow",
+        "addresses": ["alice@example.com", "carol@example.com"],
+        "domains": ["trusted-corp.com", "another-trusted.org"]
+      },
+      "work@company.com": {
+        "mode": "deny",
+        "domains": ["spam.com"]
+      }
+    }
   }
 }
 ```
 
+Accounts not listed in the file are unrestricted (no filtering).
+
 ### Loading a policy
 
-Policies are loaded via the `--access-policy` flag or `GOG_ACCESS_POLICY` environment variable:
+Policies are loaded via the `--access-policy` flag or `GOG_ACCESS_POLICY` environment variable. The account is determined from `--account` or `GOG_ACCOUNT`:
 
 ```bash
-# Via flag
-gog --access-policy ~/.config/gogcli/access-policy.json gmail search inbox
+# Via flags
+gog --account you@gmail.com --access-policy ~/.config/gogcli-safe/access-policy.json gmail search inbox
 
-# Via environment variable
-export GOG_ACCESS_POLICY=~/.config/gogcli/access-policy.json
+# Via environment variables
+export GOG_ACCOUNT=you@gmail.com
+export GOG_ACCESS_POLICY=~/.config/gogcli-safe/access-policy.json
 gog gmail search inbox
 ```
 
@@ -114,14 +140,14 @@ Agent / untrusted process          Proxy server (trusted)
 ```bash
 gog proxy serve \
   --account you@gmail.com \
-  --policy ~/.config/gogcli/access-policy.json
+  --policy ~/.config/gogcli-safe/access-policy.json
 ```
 
 This will:
 1. Load credentials for the specified account
-2. Load the access policy into memory (immutable for the session)
-3. Generate a random nonce and write it to `~/.config/gogcli/proxy.nonce`
-4. Listen on `~/.config/gogcli/proxy.sock`
+2. Load the access policy for that account into memory (immutable for the session)
+3. Generate a random nonce and write it to `~/.config/gogcli-safe/proxy.nonce`
+4. Listen on `~/.config/gogcli-safe/proxy.sock`
 
 You can customize paths:
 
@@ -138,8 +164,8 @@ gog proxy serve \
 In the agent's environment, set the socket and nonce file paths:
 
 ```bash
-export GOG_PROXY_SOCKET=~/.config/gogcli/proxy.sock
-export GOG_PROXY_NONCE_FILE=~/.config/gogcli/proxy.nonce
+export GOG_PROXY_SOCKET=~/.config/gogcli-safe/proxy.sock
+export GOG_PROXY_NONCE_FILE=~/.config/gogcli-safe/proxy.nonce
 
 # These commands are forwarded to the proxy server
 gog gmail search "from:alice@example.com"
@@ -168,18 +194,18 @@ The proxy blocks commands and flags that could compromise security:
 Set up an agent that can only interact with specific contacts:
 
 ```bash
-# 1. Create the policy
-gog config access-policy set --mode allow \
+# 1. Create the policy for your account
+gog config access-policy set --account you@gmail.com --mode allow \
   --addresses "teammate@company.com,manager@company.com" \
   --domains "company.com"
 
 # 2. Start the proxy (Terminal A)
 gog proxy serve --account you@gmail.com \
-  --policy ~/.config/gogcli/access-policy.json
+  --policy ~/.config/gogcli-safe/access-policy.json
 
 # 3. Give the agent these environment variables (Terminal B)
-export GOG_PROXY_SOCKET=~/.config/gogcli/proxy.sock
-export GOG_PROXY_NONCE_FILE=~/.config/gogcli/proxy.nonce
+export GOG_PROXY_SOCKET=~/.config/gogcli-safe/proxy.sock
+export GOG_PROXY_NONCE_FILE=~/.config/gogcli-safe/proxy.nonce
 
 # Agent can search — query is automatically augmented with policy
 gog gmail search inbox
@@ -215,18 +241,29 @@ In addition to all [upstream environment variables](https://github.com/steipete/
 ```json
 {
   "gmail": {
-    "mode": "allow",
-    "addresses": [
-      "alice@example.com",
-      "Bob <bob@work.com>"
-    ],
-    "domains": [
-      "trusted-corp.com"
-    ]
+    "accounts": {
+      "you@gmail.com": {
+        "mode": "allow",
+        "addresses": [
+          "alice@example.com",
+          "Bob <bob@work.com>"
+        ],
+        "domains": [
+          "trusted-corp.com"
+        ]
+      },
+      "work@company.com": {
+        "mode": "deny",
+        "domains": [
+          "spam.com"
+        ]
+      }
+    }
   }
 }
 ```
 
+- **accounts** — Map of Google account email → policy. Unlisted accounts are unrestricted.
 - **mode** — `"allow"` (whitelist) or `"deny"` (blacklist)
 - **addresses** — Email addresses; RFC 5322 format with display names is accepted and normalized
 - **domains** — Domain names; all addresses at the domain are matched

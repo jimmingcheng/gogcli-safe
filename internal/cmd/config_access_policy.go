@@ -17,13 +17,15 @@ import (
 // AccessPolicyCmd is the top-level access-policy management command.
 type AccessPolicyCmd struct {
 	Show   AccessPolicyShowCmd   `cmd:"" help:"Show current access policy"`
-	Set    AccessPolicySetCmd    `cmd:"" help:"Set access policy (overwrites existing)"`
+	Set    AccessPolicySetCmd    `cmd:"" help:"Set access policy (overwrites existing for account)"`
 	Add    AccessPolicyAddCmd    `cmd:"" help:"Add address or domain to existing policy"`
 	Remove AccessPolicyRemoveCmd `cmd:"" help:"Remove address or domain from existing policy"`
 	Test   AccessPolicyTestCmd   `cmd:"" name:"test" help:"Test whether an email is allowed"`
 }
 
-type AccessPolicyShowCmd struct{}
+type AccessPolicyShowCmd struct {
+	Account string `name:"account" help:"Show policy for a specific account (omit to show all)"`
+}
 
 func (c *AccessPolicyShowCmd) Run(ctx context.Context) error {
 	u := ui.FromContext(ctx)
@@ -32,7 +34,7 @@ func (c *AccessPolicyShowCmd) Run(ctx context.Context) error {
 		return err
 	}
 
-	policy, err := accessctl.LoadPolicy(path)
+	pf, err := accessctl.LoadPolicyFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if outfmt.IsJSON(ctx) {
@@ -44,35 +46,90 @@ func (c *AccessPolicyShowCmd) Run(ctx context.Context) error {
 		return err
 	}
 
+	account := strings.ToLower(strings.TrimSpace(c.Account))
+
+	// Show a single account
+	if account != "" {
+		policy := pf.ForAccount(account)
+		if policy == nil {
+			if outfmt.IsJSON(ctx) {
+				return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+					"path":    path,
+					"account": account,
+					"policy":  nil,
+				})
+			}
+			u.Out().Printf("No policy for account %s (unrestricted)", account)
+			return nil
+		}
+
+		if outfmt.IsJSON(ctx) {
+			return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+				"path":    path,
+				"account": account,
+				"policy": map[string]any{
+					"mode":      string(policy.Mode),
+					"addresses": sortedKeys(policy.Addresses),
+					"domains":   sortedKeys(policy.Domains),
+				},
+			})
+		}
+
+		u.Out().Printf("Path: %s", path)
+		u.Out().Printf("Account: %s", account)
+		u.Out().Printf("Mode: %s", policy.Mode)
+		u.Out().Println("")
+		u.Out().Println("Addresses:")
+		for _, addr := range sortedKeys(policy.Addresses) {
+			u.Out().Printf("  %s", addr)
+		}
+		u.Out().Println("")
+		u.Out().Println("Domains:")
+		for _, domain := range sortedKeys(policy.Domains) {
+			u.Out().Printf("  %s", domain)
+		}
+		return nil
+	}
+
+	// Show all accounts
 	if outfmt.IsJSON(ctx) {
-		addresses := sortedKeys(policy.Addresses)
-		domains := sortedKeys(policy.Domains)
+		accounts := make(map[string]any, len(pf.Accounts))
+		for acct, p := range pf.Accounts {
+			accounts[acct] = map[string]any{
+				"mode":      string(p.Mode),
+				"addresses": sortedKeys(p.Addresses),
+				"domains":   sortedKeys(p.Domains),
+			}
+		}
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
-			"path": path,
-			"policy": map[string]any{
-				"mode":      string(policy.Mode),
-				"addresses": addresses,
-				"domains":   domains,
-			},
+			"path":     path,
+			"accounts": accounts,
 		})
 	}
 
 	u.Out().Printf("Path: %s", path)
-	u.Out().Printf("Mode: %s", policy.Mode)
-	u.Out().Println("")
-	u.Out().Println("Addresses:")
-	for addr := range policy.Addresses {
-		u.Out().Printf("  %s", addr)
+	if len(pf.Accounts) == 0 {
+		u.Out().Println("No accounts configured")
+		return nil
 	}
-	u.Out().Println("")
-	u.Out().Println("Domains:")
-	for domain := range policy.Domains {
-		u.Out().Printf("  %s", domain)
+
+	for _, acct := range sortedKeys(accountNames(pf)) {
+		p := pf.Accounts[acct]
+		u.Out().Println("")
+		u.Out().Printf("Account: %s", acct)
+		u.Out().Printf("  Mode: %s", p.Mode)
+		if len(p.Addresses) > 0 {
+			u.Out().Printf("  Addresses: %s", strings.Join(sortedKeys(p.Addresses), ", "))
+		}
+		if len(p.Domains) > 0 {
+			u.Out().Printf("  Domains: %s", strings.Join(sortedKeys(p.Domains), ", "))
+		}
 	}
 	return nil
 }
 
 type AccessPolicySetCmd struct {
+	Account   string `name:"account" required:"" help:"Account email to set policy for"`
 	Mode      string `name:"mode" required:"" help:"Policy mode: allow or deny"`
 	Addresses string `name:"addresses" help:"Comma-separated email addresses"`
 	Domains   string `name:"domains" help:"Comma-separated domain names"`
@@ -80,6 +137,11 @@ type AccessPolicySetCmd struct {
 
 func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
+
+	account := strings.ToLower(strings.TrimSpace(c.Account))
+	if account == "" {
+		return usage("--account is required")
+	}
 
 	mode := accessctl.Mode(strings.ToLower(strings.TrimSpace(c.Mode)))
 	if mode != accessctl.ModeAllow && mode != accessctl.ModeDeny {
@@ -109,6 +171,7 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 
 	if err := dryRunExit(ctx, flags, "config.access-policy.set", map[string]any{
+		"account":   account,
 		"mode":      string(mode),
 		"addresses": sortedKeys(addresses),
 		"domains":   sortedKeys(domains),
@@ -116,37 +179,56 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
-	if err := writePolicy(policy); err != nil {
+	pf, err := loadOrCreatePolicyFile()
+	if err != nil {
+		return err
+	}
+	pf.Accounts[account] = policy
+
+	if err := writePolicyFile(pf); err != nil {
 		return err
 	}
 
 	if outfmt.IsJSON(ctx) {
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
-			"saved": true,
-			"mode":  string(mode),
+			"saved":   true,
+			"account": account,
+			"mode":    string(mode),
 		})
 	}
 
-	u.Out().Printf("Access policy set: mode=%s, %d addresses, %d domains", mode, len(addresses), len(domains))
+	u.Out().Printf("Access policy set for %s: mode=%s, %d addresses, %d domains", account, mode, len(addresses), len(domains))
 	return nil
 }
 
 type AccessPolicyAddCmd struct {
+	Account string `name:"account" required:"" help:"Account email to modify"`
 	Address string `name:"address" help:"Email address to add"`
 	Domain  string `name:"domain" help:"Domain to add"`
 }
 
 func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
+
+	account := strings.ToLower(strings.TrimSpace(c.Account))
+	if account == "" {
+		return usage("--account is required")
+	}
+
 	addr := strings.ToLower(strings.TrimSpace(c.Address))
 	domain := strings.ToLower(strings.TrimSpace(c.Domain))
 	if addr == "" && domain == "" {
 		return usage("specify --address or --domain")
 	}
 
-	policy, err := loadOrCreatePolicy()
+	pf, err := loadOrCreatePolicyFile()
 	if err != nil {
 		return err
+	}
+
+	policy := pf.Accounts[account]
+	if policy == nil {
+		return fmt.Errorf("no policy exists for account %s; use 'set' to create one first", account)
 	}
 
 	if addr != "" {
@@ -157,45 +239,58 @@ func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 
 	if err := dryRunExit(ctx, flags, "config.access-policy.add", map[string]any{
+		"account": account,
 		"address": addr,
 		"domain":  domain,
 	}); err != nil {
 		return err
 	}
 
-	if err := writePolicy(policy); err != nil {
+	if err := writePolicyFile(pf); err != nil {
 		return err
 	}
 
 	if outfmt.IsJSON(ctx) {
-		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"added": true})
+		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"added": true, "account": account})
 	}
 
 	if addr != "" {
-		u.Out().Printf("Added address: %s", addr)
+		u.Out().Printf("Added address %s to %s", addr, account)
 	}
 	if domain != "" {
-		u.Out().Printf("Added domain: %s", domain)
+		u.Out().Printf("Added domain %s to %s", domain, account)
 	}
 	return nil
 }
 
 type AccessPolicyRemoveCmd struct {
+	Account string `name:"account" required:"" help:"Account email to modify"`
 	Address string `name:"address" help:"Email address to remove"`
 	Domain  string `name:"domain" help:"Domain to remove"`
 }
 
 func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
+
+	account := strings.ToLower(strings.TrimSpace(c.Account))
+	if account == "" {
+		return usage("--account is required")
+	}
+
 	addr := strings.ToLower(strings.TrimSpace(c.Address))
 	domain := strings.ToLower(strings.TrimSpace(c.Domain))
 	if addr == "" && domain == "" {
 		return usage("specify --address or --domain")
 	}
 
-	policy, err := loadOrCreatePolicy()
+	pf, err := loadOrCreatePolicyFile()
 	if err != nil {
 		return err
+	}
+
+	policy := pf.Accounts[account]
+	if policy == nil {
+		return fmt.Errorf("no policy exists for account %s", account)
 	}
 
 	if addr != "" {
@@ -206,31 +301,33 @@ func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error
 	}
 
 	if err := dryRunExit(ctx, flags, "config.access-policy.remove", map[string]any{
+		"account": account,
 		"address": addr,
 		"domain":  domain,
 	}); err != nil {
 		return err
 	}
 
-	if err := writePolicy(policy); err != nil {
+	if err := writePolicyFile(pf); err != nil {
 		return err
 	}
 
 	if outfmt.IsJSON(ctx) {
-		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"removed": true})
+		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"removed": true, "account": account})
 	}
 
 	if addr != "" {
-		u.Out().Printf("Removed address: %s", addr)
+		u.Out().Printf("Removed address %s from %s", addr, account)
 	}
 	if domain != "" {
-		u.Out().Printf("Removed domain: %s", domain)
+		u.Out().Printf("Removed domain %s from %s", domain, account)
 	}
 	return nil
 }
 
 type AccessPolicyTestCmd struct {
-	Email string `arg:"" name:"email" help:"Email address to test"`
+	Account string `name:"account" required:"" help:"Account email to test against"`
+	Email   string `arg:"" name:"email" help:"Email address to test"`
 }
 
 func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
@@ -240,17 +337,23 @@ func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
 		return usage("email is required")
 	}
 
+	account := strings.ToLower(strings.TrimSpace(c.Account))
+	if account == "" {
+		return usage("--account is required")
+	}
+
 	path, err := accessctl.DefaultPolicyPath()
 	if err != nil {
 		return err
 	}
 
-	policy, err := accessctl.LoadPolicy(path)
+	policy, err := accessctl.LoadAccountPolicy(path, account)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if outfmt.IsJSON(ctx) {
 				return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
 					"email":   email,
+					"account": account,
 					"allowed": true,
 					"reason":  "no policy configured",
 				})
@@ -261,12 +364,26 @@ func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
 		return err
 	}
 
+	if policy == nil {
+		if outfmt.IsJSON(ctx) {
+			return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+				"email":   email,
+				"account": account,
+				"allowed": true,
+				"reason":  "no policy for account",
+			})
+		}
+		u.Out().Printf("%s: allowed (no policy for account %s)", email, account)
+		return nil
+	}
+
 	allowed := policy.IsAllowed(email)
 	reason := fmt.Sprintf("%s mode", policy.Mode)
 
 	if outfmt.IsJSON(ctx) {
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
 			"email":   email,
+			"account": account,
 			"allowed": allowed,
 			"mode":    string(policy.Mode),
 			"reason":  reason,
@@ -281,26 +398,24 @@ func (c *AccessPolicyTestCmd) Run(ctx context.Context) error {
 	return nil
 }
 
-func loadOrCreatePolicy() (*accessctl.Policy, error) {
+func loadOrCreatePolicyFile() (*accessctl.PolicyFile, error) {
 	path, err := accessctl.DefaultPolicyPath()
 	if err != nil {
 		return nil, err
 	}
-	policy, err := accessctl.LoadPolicy(path)
+	pf, err := accessctl.LoadPolicyFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &accessctl.Policy{
-				Mode:      accessctl.ModeAllow,
-				Addresses: make(map[string]bool),
-				Domains:   make(map[string]bool),
+			return &accessctl.PolicyFile{
+				Accounts: make(map[string]*accessctl.Policy),
 			}, nil
 		}
 		return nil, err
 	}
-	return policy, nil
+	return pf, nil
 }
 
-func writePolicy(policy *accessctl.Policy) error {
+func writePolicyFile(pf *accessctl.PolicyFile) error {
 	path, err := accessctl.DefaultPolicyPath()
 	if err != nil {
 		return err
@@ -311,12 +426,12 @@ func writePolicy(policy *accessctl.Policy) error {
 		return fmt.Errorf("ensure config dir: %w", mkdirErr)
 	}
 
-	data, err := accessctl.MarshalPolicy(policy)
+	data, err := accessctl.MarshalPolicyFile(pf)
 	if err != nil {
 		return err
 	}
 
-	// MarshalPolicy already returns indented JSON; just add trailing newline.
+	// MarshalPolicyFile already returns indented JSON; just add trailing newline.
 	data = append(data, '\n')
 
 	return os.WriteFile(path, data, 0o600)
@@ -329,4 +444,12 @@ func sortedKeys(m map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func accountNames(pf *accessctl.PolicyFile) map[string]bool {
+	m := make(map[string]bool, len(pf.Accounts))
+	for k := range pf.Accounts {
+		m[k] = true
+	}
+	return m
 }

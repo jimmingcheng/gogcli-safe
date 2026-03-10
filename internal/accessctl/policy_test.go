@@ -7,49 +7,133 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadPolicy(t *testing.T) {
+func TestParsePolicyFile(t *testing.T) {
 	data := []byte(`{
 		"gmail": {
-			"mode": "allow",
-			"addresses": ["alice@example.com", "Bob <bob@work.com>"],
-			"domains": ["trusted-corp.com"]
+			"accounts": {
+				"alice@gmail.com": {
+					"mode": "allow",
+					"addresses": ["bob@example.com", "Carol <carol@work.com>"],
+					"domains": ["trusted-corp.com"]
+				},
+				"work@company.com": {
+					"mode": "deny",
+					"domains": ["spam.com"]
+				}
+			}
 		}
 	}`)
 
-	p, err := ParsePolicy(data)
+	pf, err := ParsePolicyFile(data)
 	require.NoError(t, err)
-	assert.Equal(t, ModeAllow, p.Mode)
-	assert.True(t, p.Addresses["alice@example.com"])
-	assert.True(t, p.Addresses["bob@work.com"])
-	assert.True(t, p.Domains["trusted-corp.com"])
+	require.Len(t, pf.Accounts, 2)
+
+	alice := pf.ForAccount("alice@gmail.com")
+	require.NotNil(t, alice)
+	assert.Equal(t, ModeAllow, alice.Mode)
+	assert.True(t, alice.Addresses["bob@example.com"])
+	assert.True(t, alice.Addresses["carol@work.com"])
+	assert.True(t, alice.Domains["trusted-corp.com"])
+
+	work := pf.ForAccount("work@company.com")
+	require.NotNil(t, work)
+	assert.Equal(t, ModeDeny, work.Mode)
+	assert.True(t, work.Domains["spam.com"])
 }
 
-func TestLoadPolicy_Deny(t *testing.T) {
+func TestParsePolicyFile_CaseInsensitiveAccount(t *testing.T) {
 	data := []byte(`{
 		"gmail": {
-			"mode": "deny",
-			"addresses": ["spam@evil.com"],
-			"domains": ["blocked.org"]
+			"accounts": {
+				"Alice@Gmail.COM": {
+					"mode": "allow",
+					"addresses": ["bob@example.com"]
+				}
+			}
 		}
 	}`)
 
-	p, err := ParsePolicy(data)
+	pf, err := ParsePolicyFile(data)
 	require.NoError(t, err)
-	assert.Equal(t, ModeDeny, p.Mode)
+
+	// Lookup should be case-insensitive
+	assert.NotNil(t, pf.ForAccount("alice@gmail.com"))
+	assert.NotNil(t, pf.ForAccount("ALICE@GMAIL.COM"))
 }
 
-func TestLoadPolicy_InvalidMode(t *testing.T) {
-	data := []byte(`{"gmail": {"mode": "invalid"}}`)
-	_, err := ParsePolicy(data)
+func TestParsePolicyFile_UnlistedAccountReturnsNil(t *testing.T) {
+	data := []byte(`{
+		"gmail": {
+			"accounts": {
+				"alice@gmail.com": {
+					"mode": "allow",
+					"addresses": ["bob@example.com"]
+				}
+			}
+		}
+	}`)
+
+	pf, err := ParsePolicyFile(data)
+	require.NoError(t, err)
+
+	assert.Nil(t, pf.ForAccount("unknown@other.com"))
+	assert.Nil(t, pf.ForAccount(""))
+}
+
+func TestParsePolicyFile_InvalidMode(t *testing.T) {
+	data := []byte(`{
+		"gmail": {
+			"accounts": {
+				"alice@gmail.com": {
+					"mode": "invalid"
+				}
+			}
+		}
+	}`)
+	_, err := ParsePolicyFile(data)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "mode must be")
 }
 
-func TestLoadPolicy_MissingGmail(t *testing.T) {
+func TestParsePolicyFile_MissingGmail(t *testing.T) {
 	data := []byte(`{}`)
-	_, err := ParsePolicy(data)
+	_, err := ParsePolicyFile(data)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing")
+}
+
+func TestParsePolicyFile_MissingAccounts(t *testing.T) {
+	data := []byte(`{"gmail": {}}`)
+	_, err := ParsePolicyFile(data)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "missing")
+}
+
+func TestParseAccountPolicy(t *testing.T) {
+	data := []byte(`{
+		"gmail": {
+			"accounts": {
+				"alice@gmail.com": {
+					"mode": "allow",
+					"addresses": ["bob@example.com"]
+				}
+			}
+		}
+	}`)
+
+	p, err := ParseAccountPolicy(data, "alice@gmail.com")
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	assert.Equal(t, ModeAllow, p.Mode)
+
+	p2, err := ParseAccountPolicy(data, "unknown@other.com")
+	require.NoError(t, err)
+	assert.Nil(t, p2)
+}
+
+func TestForAccount_NilPolicyFile(t *testing.T) {
+	var pf *PolicyFile
+	assert.Nil(t, pf.ForAccount("anyone@anywhere.com"))
 }
 
 func TestIsAllowed_AllowMode(t *testing.T) {
@@ -130,21 +214,44 @@ func TestContainsRestricted_NilPolicy(t *testing.T) {
 	assert.False(t, p.ContainsRestricted("anyone@anywhere.com"))
 }
 
-func TestMarshalPolicy(t *testing.T) {
-	p := &Policy{
-		Mode:      ModeAllow,
-		Addresses: map[string]bool{"alice@example.com": true},
-		Domains:   map[string]bool{"trusted.com": true},
+func TestMarshalPolicyFile(t *testing.T) {
+	pf := &PolicyFile{
+		Accounts: map[string]*Policy{
+			"alice@gmail.com": {
+				Mode:      ModeAllow,
+				Addresses: map[string]bool{"bob@example.com": true},
+				Domains:   map[string]bool{"trusted.com": true},
+			},
+			"work@company.com": {
+				Mode:      ModeDeny,
+				Addresses: map[string]bool{},
+				Domains:   map[string]bool{"spam.com": true},
+			},
+		},
 	}
 
-	data, err := MarshalPolicy(p)
+	data, err := MarshalPolicyFile(pf)
 	require.NoError(t, err)
 
-	p2, err := ParsePolicy(data)
+	pf2, err := ParsePolicyFile(data)
 	require.NoError(t, err)
-	assert.Equal(t, p.Mode, p2.Mode)
-	assert.True(t, p2.Addresses["alice@example.com"])
-	assert.True(t, p2.Domains["trusted.com"])
+	require.Len(t, pf2.Accounts, 2)
+
+	alice := pf2.ForAccount("alice@gmail.com")
+	require.NotNil(t, alice)
+	assert.Equal(t, ModeAllow, alice.Mode)
+	assert.True(t, alice.Addresses["bob@example.com"])
+	assert.True(t, alice.Domains["trusted.com"])
+
+	work := pf2.ForAccount("work@company.com")
+	require.NotNil(t, work)
+	assert.Equal(t, ModeDeny, work.Mode)
+	assert.True(t, work.Domains["spam.com"])
+}
+
+func TestMarshalPolicyFile_Nil(t *testing.T) {
+	_, err := MarshalPolicyFile(nil)
+	assert.Error(t, err)
 }
 
 func TestNormalizeEmail(t *testing.T) {

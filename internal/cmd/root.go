@@ -185,12 +185,19 @@ func Execute(args []string) (err error) {
 	if proxyPolicy != nil {
 		ctx = accessctl.WithPolicy(ctx, proxyPolicy)
 	} else if policyPath := strings.TrimSpace(cli.AccessPolicy); policyPath != "" {
-		policy, policyErr := accessctl.LoadPolicy(policyPath)
+		account := strings.TrimSpace(cli.Account)
+		if account == "" {
+			account = strings.TrimSpace(os.Getenv("GOG_ACCOUNT"))
+		}
+		// Load account-specific policy; if account is empty or not in file, returns nil (unrestricted)
+		policy, policyErr := accessctl.LoadAccountPolicy(policyPath, account)
 		if policyErr != nil {
 			_, _ = fmt.Fprintln(os.Stderr, errfmt.Format(policyErr))
 			return policyErr
 		}
-		ctx = accessctl.WithPolicy(ctx, policy)
+		if policy != nil {
+			ctx = accessctl.WithPolicy(ctx, policy)
+		}
 	}
 
 	uiColor := cli.Color

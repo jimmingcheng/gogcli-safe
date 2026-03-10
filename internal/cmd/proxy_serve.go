@@ -94,12 +94,16 @@ func (c *ProxyServeCmd) Run(ctx context.Context, flags *RootFlags) error {
 		}
 	}
 	if policyPath != "" {
-		var err error
-		policy, err = accessctl.LoadPolicy(policyPath)
+		pf, err := accessctl.LoadPolicyFile(policyPath)
 		if err != nil {
 			return fmt.Errorf("load access policy: %w", err)
 		}
-		slog.Info("loaded access policy", "path", policyPath, "mode", policy.Mode)
+		policy = pf.ForAccount(account)
+		if policy != nil {
+			slog.Info("loaded access policy", "path", policyPath, "account", account, "mode", policy.Mode)
+		} else {
+			slog.Info("no policy entry for account", "path", policyPath, "account", account)
+		}
 	}
 
 	// Generate session nonce
