@@ -32,7 +32,7 @@ type GmailDraftsListCmd struct {
 
 func (c *GmailDraftsListCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
-	_, svc, err := requireGmailService(ctx, flags)
+	ctx, _, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,7 @@ func (c *GmailDraftsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return usage("empty draftId")
 	}
 
-	_, svc, err := requireGmailService(ctx, flags)
+	ctx, _, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -233,8 +233,15 @@ func (c *GmailDraftsDeleteCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return confirmErr
 	}
 
-	_, svc, err := requireGmailService(ctx, flags)
+	ctx, _, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
+		return err
+	}
+	draft, err := loadDraftMetadata(ctx, svc, draftID)
+	if err != nil {
+		return err
+	}
+	if err := enforceGmailDraftAccess(ctx, draft); err != nil {
 		return err
 	}
 
@@ -258,7 +265,7 @@ func (c *GmailDraftsSendCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return usage("empty draftId")
 	}
 
-	_, svc, err := requireGmailService(ctx, flags)
+	ctx, _, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -539,7 +546,7 @@ func (c *GmailDraftsCreateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return dryRunErr
 	}
 
-	account, svc, err := requireGmailService(ctx, flags)
+	ctx, account, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -615,7 +622,7 @@ func (c *GmailDraftsUpdateCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return validateErr
 	}
 
-	account, svc, err := requireGmailService(ctx, flags)
+	ctx, account, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
 	}

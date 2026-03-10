@@ -100,23 +100,9 @@ func Execute(args []string) (err error) {
 		args = []string{"--help"}
 	}
 
-	// Proxy client intercept: if GOG_PROXY_SOCKET is set, forward the request
-	// to the proxy process before doing anything else (no credential loading).
-	proxySocket := os.Getenv("GOG_PROXY_SOCKET")
-	if proxySocket == "" {
-		// Check if --proxy-socket is in the args
-		for i, a := range args {
-			if a == "--proxy-socket" && i+1 < len(args) {
-				proxySocket = args[i+1]
-				break
-			}
-			if strings.HasPrefix(a, "--proxy-socket=") {
-				proxySocket = strings.TrimPrefix(a, "--proxy-socket=")
-				break
-			}
-		}
-	}
-	if proxySocket != "" {
+	// Proxy client intercept: if proxy targeting is configured, forward the
+	// request before doing anything else (no credential loading).
+	if proxySocket := proxySocketFromArgsEnv(args); proxySocket != "" {
 		return proxyClientExec(proxySocket, args)
 	}
 
@@ -181,28 +167,10 @@ func Execute(args []string) (err error) {
 	ctx = authclient.WithClient(ctx, cli.Client)
 	ctx = authclient.WithAccessToken(ctx, directAccessToken(&cli.RootFlags))
 
-	// Load access policy: proxy-injected policy takes precedence, then file path.
+	// Load proxy-injected policy into context. Direct CLI policy loading is done
+	// by Gmail commands after they resolve the effective account.
 	if proxyPolicy != nil {
 		ctx = accessctl.WithPolicy(ctx, proxyPolicy)
-	} else if policyPath := strings.TrimSpace(cli.AccessPolicy); policyPath != "" {
-		policyPath, err = resolveAccessPolicyPath(&cli.RootFlags)
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, errfmt.Format(err))
-			return err
-		}
-		account := strings.TrimSpace(cli.Account)
-		if account == "" {
-			account = strings.TrimSpace(os.Getenv("GOG_ACCOUNT"))
-		}
-		// Load account-specific policy; if account is empty or not in file, returns nil (unrestricted)
-		policy, policyErr := accessctl.LoadAccountPolicy(policyPath, account)
-		if policyErr != nil {
-			_, _ = fmt.Fprintln(os.Stderr, errfmt.Format(policyErr))
-			return policyErr
-		}
-		if policy != nil {
-			ctx = accessctl.WithPolicy(ctx, policy)
-		}
 	}
 
 	uiColor := cli.Color
@@ -276,6 +244,19 @@ func rewriteDesirePathArgs(args []string) []string {
 		out = append(out, a)
 	}
 	return out
+}
+
+func proxySocketFromArgsEnv(args []string) string {
+	for i, a := range args {
+		if a == "--proxy-socket" && i+1 < len(args) {
+			return strings.TrimSpace(args[i+1])
+		}
+		if strings.HasPrefix(a, "--proxy-socket=") {
+			return strings.TrimSpace(strings.TrimPrefix(a, "--proxy-socket="))
+		}
+	}
+
+	return strings.TrimSpace(os.Getenv("GOG_PROXY_SOCKET"))
 }
 
 func isCalendarEventsCommand(args []string) bool {

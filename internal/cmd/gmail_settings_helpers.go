@@ -17,7 +17,7 @@ type gmailEmailStatusRow struct {
 }
 
 func loadGmailSettingsService(ctx context.Context, flags *RootFlags) (*gmail.Service, error) {
-	_, svc, err := requireGmailService(ctx, flags)
+	_, _, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return nil, err
 	}

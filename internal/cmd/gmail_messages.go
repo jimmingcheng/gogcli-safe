@@ -32,7 +32,7 @@ type GmailMessagesSearchCmd struct {
 
 func (c *GmailMessagesSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -176,13 +176,17 @@ func (c *GmailMessagesModifyCmd) Run(ctx context.Context, flags *RootFlags) erro
 		return err
 	}
 
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
 
 	svc, err := newGmailService(ctx, account)
 	if err != nil {
+		return err
+	}
+
+	if err := authorizeGmailMessageID(ctx, svc, messageID); err != nil {
 		return err
 	}
 

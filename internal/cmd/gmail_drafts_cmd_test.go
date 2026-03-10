@@ -176,9 +176,21 @@ func TestGmailDraftsDeleteCmd_JSON(t *testing.T) {
 	t.Cleanup(func() { newGmailService = origNew })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/gmail/v1/users/me/drafts/d1") && r.Method == http.MethodDelete {
-			w.WriteHeader(http.StatusNoContent)
-			return
+		if strings.Contains(r.URL.Path, "/gmail/v1/users/me/drafts/d1") {
+			switch r.Method {
+			case http.MethodGet:
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": "d1",
+					"message": map[string]any{
+						"id": "m1",
+					},
+				})
+				return
+			case http.MethodDelete:
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 		}
 		http.NotFound(w, r)
 	}))

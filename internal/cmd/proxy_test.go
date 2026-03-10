@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,4 +80,35 @@ func TestBlockedProxyCommands(t *testing.T) {
 	for _, cmd := range allowed {
 		assert.False(t, blockedProxyCommands[cmd], "expected %q to be allowed", cmd)
 	}
+}
+
+func TestProxySocketFromArgsEnv_PrefersCLI(t *testing.T) {
+	t.Setenv("GOG_PROXY_SOCKET", "/tmp/env.sock")
+
+	got := proxySocketFromArgsEnv([]string{"--proxy-socket", "/tmp/cli.sock", "gmail", "search"})
+	assert.Equal(t, "/tmp/cli.sock", got)
+}
+
+func TestProxyNoncePath_PrefersCLI(t *testing.T) {
+	t.Setenv("GOG_PROXY_NONCE_FILE", "/tmp/env.nonce")
+
+	got := proxyNoncePath([]string{"--proxy-nonce-file", "/tmp/cli.nonce", "gmail", "search"}, "/tmp/proxy.sock")
+	assert.Equal(t, "/tmp/cli.nonce", got)
+}
+
+func TestResolveProxyPolicyPath_UsesGlobalOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "override.json")
+
+	got, err := resolveProxyPolicyPath(&ProxyServeCmd{}, &RootFlags{AccessPolicy: path})
+	assert.NoError(t, err)
+	assert.Equal(t, path, got)
+}
+
+func TestResolveProxyPolicyPath_PrefersCommandPolicyFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "override.json")
+	cmdPath := filepath.Join(t.TempDir(), "command.json")
+
+	got, err := resolveProxyPolicyPath(&ProxyServeCmd{Policy: cmdPath}, &RootFlags{AccessPolicy: path})
+	assert.NoError(t, err)
+	assert.Equal(t, cmdPath, got)
 }

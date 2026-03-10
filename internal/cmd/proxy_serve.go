@@ -19,6 +19,7 @@ import (
 	"syscall"
 
 	"github.com/steipete/gogcli/internal/accessctl"
+	"github.com/steipete/gogcli/internal/config"
 )
 
 // execMu serializes in-process command execution because executeInProcess
@@ -29,8 +30,8 @@ var execMu sync.Mutex
 // ProxyServeCmd starts the proxy server process.
 // The account is taken from the global --account flag.
 type ProxyServeCmd struct {
-	Policy   string `name:"policy" help:"Path to access policy file" default:""`
-	Socket   string `name:"socket" help:"Unix socket path" default:""`
+	Policy    string `name:"policy" help:"Path to access policy file" default:""`
+	Socket    string `name:"socket" help:"Unix socket path" default:""`
 	NonceFile string `name:"nonce-file" help:"Nonce output path" default:""`
 }
 
@@ -63,6 +64,10 @@ func (c *ProxyServeCmd) Run(ctx context.Context, flags *RootFlags) error {
 	if err != nil {
 		return err
 	}
+	client, err := config.NormalizeClientNameOrDefault(flags.Client)
+	if err != nil {
+		return err
+	}
 
 	// Resolve defaults
 	socketPath := strings.TrimSpace(c.Socket)
@@ -82,16 +87,9 @@ func (c *ProxyServeCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	// Load access policy into memory (once, immutable)
 	var policy *accessctl.Policy
-	policyPath := strings.TrimSpace(c.Policy)
-	if policyPath == "" {
-		defaultPath, err := accessctl.DefaultPolicyPath()
-		if err != nil {
-			return err
-		}
-		// Only load if file exists at the default path
-		if _, statErr := os.Stat(defaultPath); statErr == nil {
-			policyPath = defaultPath
-		}
+	policyPath, err := resolveProxyPolicyPath(c, flags)
+	if err != nil {
+		return err
 	}
 	if policyPath != "" {
 		pf, err := accessctl.LoadPolicyFile(policyPath)
@@ -164,11 +162,31 @@ func (c *ProxyServeCmd) Run(ctx context.Context, flags *RootFlags) error {
 			}
 		}
 
-		go c.handleConn(ctx, conn, nonce, account, policy)
+		go c.handleConn(ctx, conn, nonce, account, client, policy)
 	}
 }
 
-func (c *ProxyServeCmd) handleConn(ctx context.Context, conn net.Conn, nonce string, account string, policy *accessctl.Policy) {
+func resolveProxyPolicyPath(c *ProxyServeCmd, flags *RootFlags) (string, error) {
+	if c != nil {
+		if path := strings.TrimSpace(c.Policy); path != "" {
+			return config.ExpandPath(path)
+		}
+	}
+	if flags != nil && strings.TrimSpace(flags.AccessPolicy) != "" {
+		return resolveAccessPolicyPath(flags)
+	}
+
+	defaultPath, err := accessctl.DefaultPolicyPath()
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Stat(defaultPath); statErr == nil {
+		return defaultPath, nil
+	}
+	return "", nil
+}
+
+func (c *ProxyServeCmd) handleConn(ctx context.Context, conn net.Conn, nonce string, account string, client string, policy *accessctl.Policy) {
 	defer conn.Close()
 
 	// Read request
@@ -201,10 +219,11 @@ func (c *ProxyServeCmd) handleConn(ctx context.Context, conn net.Conn, nonce str
 		}
 	}
 
-	// Check for blocked flags (--access-token, --access-policy, --account)
+	// Check for blocked flags (--access-token, --access-policy, --account, --client)
 	for _, arg := range req.Args {
 		if strings.HasPrefix(arg, "--access-token") ||
 			strings.HasPrefix(arg, "--access-policy") ||
+			arg == "--client" || strings.HasPrefix(arg, "--client=") ||
 			arg == "--account" || strings.HasPrefix(arg, "--account=") ||
 			arg == "--acct" || strings.HasPrefix(arg, "--acct=") ||
 			arg == "-a" {
@@ -220,8 +239,8 @@ func (c *ProxyServeCmd) handleConn(ctx context.Context, conn net.Conn, nonce str
 		}
 	}
 
-	// Inject the account flag
-	args := append([]string{"--account", account}, req.Args...)
+	// Inject the trusted client/account selection.
+	args := append([]string{"--client", client, "--account", account}, req.Args...)
 
 	// Execute the command in-process, capturing stdout/stderr
 	resp := c.executeInProcess(ctx, args, policy)

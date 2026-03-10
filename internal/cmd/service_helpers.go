@@ -27,8 +27,32 @@ func requireCalendarService(ctx context.Context, flags *RootFlags) (string, *cal
 	return requireGoogleService(ctx, flags, newCalendarService)
 }
 
-func requireGmailService(ctx context.Context, flags *RootFlags) (string, *gmail.Service, error) {
-	return requireGoogleService(ctx, flags, newGmailService)
+func requireGmailAccount(ctx context.Context, flags *RootFlags) (context.Context, string, error) {
+	account, err := requireAccount(flags)
+	if err != nil {
+		return ctx, "", err
+	}
+
+	ctx, err = withLoadedGmailPolicy(ctx, flags, account)
+	if err != nil {
+		return ctx, "", err
+	}
+
+	return ctx, account, nil
+}
+
+func requireGmailService(ctx context.Context, flags *RootFlags) (context.Context, string, *gmail.Service, error) {
+	ctx, account, err := requireGmailAccount(ctx, flags)
+	if err != nil {
+		return ctx, "", nil, err
+	}
+
+	svc, err := newGmailService(ctx, account)
+	if err != nil {
+		return ctx, "", nil, err
+	}
+
+	return ctx, account, svc, nil
 }
 
 func requireClassroomService(ctx context.Context, flags *RootFlags) (string, *classroom.Service, error) {

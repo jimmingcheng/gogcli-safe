@@ -150,7 +150,7 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	addresses := make(map[string]bool)
 	for _, addr := range splitCSV(c.Addresses) {
-		addr = strings.ToLower(strings.TrimSpace(addr))
+		addr = accessctl.NormalizePolicyAddress(addr)
 		if addr != "" {
 			addresses[addr] = true
 		}
@@ -158,7 +158,7 @@ func (c *AccessPolicySetCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	domains := make(map[string]bool)
 	for _, d := range splitCSV(c.Domains) {
-		d = strings.ToLower(strings.TrimSpace(d))
+		d = accessctl.NormalizePolicyDomain(d)
 		if d != "" {
 			domains[d] = true
 		}
@@ -215,8 +215,8 @@ func (c *AccessPolicyAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return usage("--policy-account is required")
 	}
 
-	addr := strings.ToLower(strings.TrimSpace(c.Address))
-	domain := strings.ToLower(strings.TrimSpace(c.Domain))
+	addr := accessctl.NormalizePolicyAddress(c.Address)
+	domain := accessctl.NormalizePolicyDomain(c.Domain)
 	if addr == "" && domain == "" {
 		return usage("specify --address or --domain")
 	}
@@ -277,8 +277,8 @@ func (c *AccessPolicyRemoveCmd) Run(ctx context.Context, flags *RootFlags) error
 		return usage("--policy-account is required")
 	}
 
-	addr := strings.ToLower(strings.TrimSpace(c.Address))
-	domain := strings.ToLower(strings.TrimSpace(c.Domain))
+	addr := accessctl.NormalizePolicyAddress(c.Address)
+	domain := accessctl.NormalizePolicyDomain(c.Domain)
 	if addr == "" && domain == "" {
 		return usage("specify --address or --domain")
 	}

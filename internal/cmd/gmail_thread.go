@@ -62,7 +62,7 @@ type GmailThreadGetCmd struct {
 
 func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -210,13 +210,17 @@ func (c *GmailThreadModifyCmd) Run(ctx context.Context, flags *RootFlags) error 
 		return err
 	}
 
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
 
 	svc, err := newGmailService(ctx, account)
 	if err != nil {
+		return err
+	}
+
+	if err := authorizeGmailThreadMutation(ctx, svc, threadID); err != nil {
 		return err
 	}
 
@@ -255,7 +259,7 @@ type GmailThreadAttachmentsCmd struct {
 
 func (c *GmailThreadAttachmentsCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -273,6 +277,12 @@ func (c *GmailThreadAttachmentsCmd) Run(ctx context.Context, flags *RootFlags) e
 	thread, err := svc.Users.Threads.Get("me", threadID).Format("full").Context(ctx).Do()
 	if err != nil {
 		return err
+	}
+	if gmailPolicy(ctx) != nil && thread != nil {
+		thread = filterGmailThread(ctx, thread)
+		if thread == nil {
+			return fmt.Errorf("access policy: all messages in thread are restricted")
+		}
 	}
 
 	if thread == nil || len(thread.Messages) == 0 {

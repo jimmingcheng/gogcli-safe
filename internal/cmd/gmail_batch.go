@@ -38,13 +38,17 @@ func (c *GmailBatchDeleteCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return confirmErr
 	}
 
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
 
 	svc, err := newGmailService(ctx, account)
 	if err != nil {
+		return err
+	}
+
+	if err := authorizeGmailMessageIDs(ctx, svc, ids); err != nil {
 		return err
 	}
 
@@ -99,13 +103,17 @@ func (c *GmailBatchModifyCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}
 
 	svc, err := newGmailService(ctx, account)
 	if err != nil {
+		return err
+	}
+
+	if err := authorizeGmailMessageIDs(ctx, svc, ids); err != nil {
 		return err
 	}
 

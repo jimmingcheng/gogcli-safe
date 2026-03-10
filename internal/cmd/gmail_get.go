@@ -25,7 +25,7 @@ const (
 
 func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	u := ui.FromContext(ctx)
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}

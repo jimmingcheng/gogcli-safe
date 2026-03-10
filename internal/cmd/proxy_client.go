@@ -12,25 +12,7 @@ import (
 // proxyClientExec sends CLI args to the proxy server and prints the response.
 // This is called from Execute() when GOG_PROXY_SOCKET is set.
 func proxyClientExec(socketPath string, args []string) error {
-	// Read nonce
-	noncePath := os.Getenv("GOG_PROXY_NONCE_FILE")
-	if noncePath == "" {
-		// Check for --proxy-nonce-file flag in args
-		for i, a := range args {
-			if a == "--proxy-nonce-file" && i+1 < len(args) {
-				noncePath = args[i+1]
-				break
-			}
-			if strings.HasPrefix(a, "--proxy-nonce-file=") {
-				noncePath = strings.TrimPrefix(a, "--proxy-nonce-file=")
-				break
-			}
-		}
-	}
-	if noncePath == "" {
-		// Default: same directory as socket, .nonce extension
-		noncePath = strings.TrimSuffix(socketPath, ".sock") + ".nonce"
-	}
+	noncePath := proxyNoncePath(args, socketPath)
 
 	nonceData, err := os.ReadFile(noncePath)
 	if err != nil {
@@ -89,6 +71,23 @@ func proxyClientExec(socketPath string, args []string) error {
 		return &ExitError{Code: resp.ExitCode, Err: fmt.Errorf("proxy command exited with code %d", resp.ExitCode)}
 	}
 	return nil
+}
+
+func proxyNoncePath(args []string, socketPath string) string {
+	for i, a := range args {
+		if a == "--proxy-nonce-file" && i+1 < len(args) {
+			return strings.TrimSpace(args[i+1])
+		}
+		if strings.HasPrefix(a, "--proxy-nonce-file=") {
+			return strings.TrimSpace(strings.TrimPrefix(a, "--proxy-nonce-file="))
+		}
+	}
+
+	if noncePath := strings.TrimSpace(os.Getenv("GOG_PROXY_NONCE_FILE")); noncePath != "" {
+		return noncePath
+	}
+
+	return strings.TrimSuffix(socketPath, ".sock") + ".nonce"
 }
 
 // stripProxyFlags removes --proxy-socket, --proxy-nonce-file, and related

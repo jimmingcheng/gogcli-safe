@@ -32,6 +32,15 @@ func TestGmailDraftsCreateDelete_Text(t *testing.T) {
 				},
 			})
 			return
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/drafts/d1") && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "d1",
+				"message": map[string]any{
+					"id": "m1",
+				},
+			})
+			return
 		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/drafts/d1") && r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -127,7 +127,7 @@ func (c *GmailSendCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return dryRunErr
 	}
 
-	account, svc, err := requireGmailService(ctx, flags)
+	ctx, account, svc, err := requireGmailService(ctx, flags)
 	if err != nil {
 		return err
 	}
@@ -571,15 +571,29 @@ func fetchMessageForReplyInfo(ctx context.Context, svc *gmail.Service, messageID
 	} else {
 		call = call.Format(gmailFormatMetadata).MetadataHeaders(replyInfoMetadataHeaders...)
 	}
-	return call.Do()
+	msg, err := call.Do()
+	if err != nil {
+		return nil, err
+	}
+	if err := enforceGmailRead(ctx, msg); err != nil {
+		return nil, err
+	}
+	return msg, nil
 }
 
 func fetchThreadForReplyInfo(ctx context.Context, svc *gmail.Service, threadID string) (*gmail.Thread, error) {
-	return svc.Users.Threads.Get("me", threadID).
+	thread, err := svc.Users.Threads.Get("me", threadID).
 		Format(gmailFormatMetadata).
 		MetadataHeaders(replyInfoMetadataHeaders...).
 		Context(ctx).
 		Do()
+	if err != nil {
+		return nil, err
+	}
+	if filtered := filterGmailThread(ctx, thread); filtered != nil {
+		return filtered, nil
+	}
+	return nil, fmt.Errorf("access policy: all messages in thread are restricted")
 }
 
 func replyInfoFromMessage(msg *gmail.Message, includeQuoteBodies bool) *replyInfo {

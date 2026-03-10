@@ -88,3 +88,41 @@ func TestAccessPolicySetCmd_WritesAccessPolicyOverridePath(t *testing.T) {
 		t.Fatalf("expected override file to be written, got %q", content)
 	}
 }
+
+func TestAccessPolicySetCmd_NormalizesDomainEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "override.json")
+
+	u, uiErr := ui.New(ui.Options{Stdout: io.Discard, Stderr: io.Discard, Color: "never"})
+	if uiErr != nil {
+		t.Fatalf("ui.New: %v", uiErr)
+	}
+	ctx := outfmt.WithMode(ui.WithUI(context.Background(), u), outfmt.Mode{})
+	flags := &RootFlags{AccessPolicy: path}
+
+	if err := runKong(t, &AccessPolicySetCmd{}, []string{
+		"--policy-account", "demo@example.com",
+		"--mode", "allow",
+		"--domains", "@example.com",
+	}, ctx, flags); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var parsed struct {
+		Gmail struct {
+			Accounts map[string]struct {
+				Domains []string `json:"domains"`
+			} `json:"accounts"`
+		} `json:"gmail"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("json parse: %v", err)
+	}
+	got := parsed.Gmail.Accounts["demo@example.com"].Domains
+	if len(got) != 1 || got[0] != "example.com" {
+		t.Fatalf("expected normalized domain entry, got %#v", got)
+	}
+}

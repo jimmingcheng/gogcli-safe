@@ -83,7 +83,7 @@ func gmailBulkLabelOp(ctx context.Context, flags *RootFlags, messageIDs []string
 		return err
 	}
 
-	account, err := requireAccount(flags)
+	ctx, account, err := requireGmailAccount(ctx, flags)
 	if err != nil {
 		return err
 	}

@@ -80,57 +80,6 @@ func ValidateSendRecipients(p *Policy, to, cc, bcc []string) error {
 	return nil
 }
 
-// AugmentSearchQuery appends address restrictions to a Gmail search query.
-// In allow-mode, adds from:/to: clauses to pre-filter at the API level.
-// In deny-mode, adds negated from:/to: clauses.
-func AugmentSearchQuery(p *Policy, query string) string {
-	if p == nil {
-		return query
-	}
-
-	// Collect all entries (both addresses and domains)
-	var entries []string
-	for addr := range p.Addresses {
-		entries = append(entries, addr)
-	}
-	for domain := range p.Domains {
-		entries = append(entries, "@"+domain)
-	}
-
-	if len(entries) == 0 {
-		return query
-	}
-
-	switch p.Mode {
-	case ModeAllow:
-		// Build: {from:a OR to:a OR from:b OR to:b ...}
-		var clauses []string
-		for _, entry := range entries {
-			clauses = append(clauses, fmt.Sprintf("from:%s", entry))
-			clauses = append(clauses, fmt.Sprintf("to:%s", entry))
-		}
-		filter := "{" + strings.Join(clauses, " ") + "}"
-		if strings.TrimSpace(query) == "" {
-			return filter
-		}
-		return query + " " + filter
-	case ModeDeny:
-		// Build: -from:a -to:a -from:b -to:b ...
-		var clauses []string
-		for _, entry := range entries {
-			clauses = append(clauses, fmt.Sprintf("-from:%s", entry))
-			clauses = append(clauses, fmt.Sprintf("-to:%s", entry))
-		}
-		filter := strings.Join(clauses, " ")
-		if strings.TrimSpace(query) == "" {
-			return filter
-		}
-		return query + " " + filter
-	default:
-		return query
-	}
-}
-
 func collectMessageEmails(msg *gmail.Message) []string {
 	if msg == nil || msg.Payload == nil {
 		return nil

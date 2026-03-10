@@ -24,6 +24,18 @@ type Policy struct {
 	Domains   map[string]bool // e.g. "example.com"
 }
 
+// NormalizePolicyAddress canonicalizes an address entry for policy storage.
+func NormalizePolicyAddress(email string) string {
+	return normalizeEmail(email)
+}
+
+// NormalizePolicyDomain canonicalizes a domain entry for policy storage.
+func NormalizePolicyDomain(domain string) string {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	domain = strings.TrimPrefix(domain, "@")
+	return domain
+}
+
 // IsAllowed returns true if the given email address is allowed by the policy.
 func (p *Policy) IsAllowed(email string) bool {
 	if p == nil {
@@ -230,7 +242,7 @@ func parseAccountPolicy(ap *accountPolicy) (*Policy, error) {
 
 	addresses := make(map[string]bool, len(ap.Addresses))
 	for _, addr := range ap.Addresses {
-		normalized := normalizeEmail(addr)
+		normalized := NormalizePolicyAddress(addr)
 		if normalized != "" {
 			addresses[normalized] = true
 		}
@@ -238,7 +250,7 @@ func parseAccountPolicy(ap *accountPolicy) (*Policy, error) {
 
 	domains := make(map[string]bool, len(ap.Domains))
 	for _, d := range ap.Domains {
-		d = strings.ToLower(strings.TrimSpace(d))
+		d = NormalizePolicyDomain(d)
 		if d != "" {
 			domains[d] = true
 		}

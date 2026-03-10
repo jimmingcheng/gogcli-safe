@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"google.golang.org/api/gmail/v1"
@@ -13,6 +14,30 @@ import (
 // gmailPolicy extracts the access policy from context. Returns nil if none set.
 func gmailPolicy(ctx context.Context) *accessctl.Policy {
 	return accessctl.PolicyFromContext(ctx)
+}
+
+func withLoadedGmailPolicy(ctx context.Context, flags *RootFlags, account string) (context.Context, error) {
+	if gmailPolicy(ctx) != nil {
+		return ctx, nil
+	}
+	if flags == nil || strings.TrimSpace(flags.AccessPolicy) == "" {
+		return ctx, nil
+	}
+
+	policyPath, err := resolveAccessPolicyPath(flags)
+	if err != nil {
+		return ctx, err
+	}
+
+	policy, err := accessctl.LoadAccountPolicy(policyPath, account)
+	if err != nil {
+		return ctx, err
+	}
+	if policy == nil {
+		return ctx, nil
+	}
+
+	return accessctl.WithPolicy(ctx, policy), nil
 }
 
 // enforceGmailRead checks whether a message is allowed by the access policy.
@@ -63,6 +88,63 @@ func draftRecipients(draft *gmail.Draft) (to []string, cc []string, bcc []string
 	return accessctl.ExtractEmails(headerValue(draft.Message.Payload, "To")),
 		accessctl.ExtractEmails(headerValue(draft.Message.Payload, "Cc")),
 		accessctl.ExtractEmails(headerValue(draft.Message.Payload, "Bcc"))
+}
+
+func authorizeGmailMessageID(ctx context.Context, svc *gmail.Service, messageID string) error {
+	if gmailPolicy(ctx) == nil || strings.TrimSpace(messageID) == "" {
+		return nil
+	}
+
+	msg, err := svc.Users.Messages.Get("me", messageID).
+		Format("metadata").
+		MetadataHeaders("From", "To", "Cc", "Bcc").
+		Fields("id,payload(headers)").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return err
+	}
+
+	return enforceGmailRead(ctx, msg)
+}
+
+func authorizeGmailMessageIDs(ctx context.Context, svc *gmail.Service, ids []string) error {
+	if gmailPolicy(ctx) == nil || len(ids) == 0 {
+		return nil
+	}
+
+	allowed, err := filterAllowedMessageIDs(ctx, svc, ids)
+	if err != nil {
+		return err
+	}
+	if len(allowed) != len(ids) {
+		return fmt.Errorf("access policy: one or more messages are restricted")
+	}
+
+	return nil
+}
+
+func authorizeGmailThreadMutation(ctx context.Context, svc *gmail.Service, threadID string) error {
+	if gmailPolicy(ctx) == nil || strings.TrimSpace(threadID) == "" {
+		return nil
+	}
+
+	thread, err := svc.Users.Threads.Get("me", threadID).
+		Format("metadata").
+		MetadataHeaders("From", "To", "Cc", "Bcc").
+		Fields("id,messages(id,payload(headers))").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return err
+	}
+
+	filtered := filterGmailThread(ctx, thread)
+	if filtered == nil || len(filtered.Messages) != len(thread.Messages) {
+		return fmt.Errorf("access policy: thread contains restricted messages")
+	}
+
+	return nil
 }
 
 func filterAllowedMessageIDs(ctx context.Context, svc *gmail.Service, ids []string) ([]string, error) {
