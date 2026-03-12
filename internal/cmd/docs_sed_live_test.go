@@ -45,7 +45,7 @@ func TestV10LiveVerification(t *testing.T) {
 
 	gogBin := os.Getenv("GOG_BIN")
 	if gogBin == "" {
-		gogBin = "gog"
+		gogBin = "gog-safe"
 	}
 
 	ctx := context.Background()

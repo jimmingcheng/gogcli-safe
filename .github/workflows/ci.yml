@@ -81,7 +81,7 @@ jobs:
         run: make lint
         shell: bash
       - name: Build
-        run: go build ./cmd/gog
+        run: go build ./cmd/gog-safe
 
   darwin-cgo-build:
     runs-on: macos-latest
@@ -94,4 +94,4 @@ jobs:
       - name: Test
         run: make test
       - name: Build (Keychain / cgo)
-        run: CGO_ENABLED=1 go build ./cmd/gog
+        run: CGO_ENABLED=1 go build ./cmd/gog-safe

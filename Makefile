@@ -3,12 +3,12 @@ SHELL := /bin/bash
 # `make` should build the binary by default.
 .DEFAULT_GOAL := build
 
-.PHONY: build gog gogcli gog-help gogcli-help help fmt fmt-check lint test ci tools
+.PHONY: build gog-safe gog gogcli gog-safe-help gog-help gogcli-help help fmt fmt-check lint test ci tools
 .PHONY: worker-ci
 
 BIN_DIR := $(CURDIR)/bin
-BIN := $(BIN_DIR)/gog
-CMD := ./cmd/gog
+BIN := $(BIN_DIR)/gog-safe
+CMD := ./cmd/gog-safe
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo "")
@@ -27,9 +27,9 @@ TOOLS_STAMP := $(TOOLS_DIR)/.versions
 TOOLS_VERSION := gofumpt=v0.9.2;goimports=v0.42.0;golangci-lint=v2.10.1
 
 # Allow passing CLI args as extra "targets":
-#   make gogcli -- --help
-#   make gogcli -- gmail --help
-ifneq ($(filter gogcli gog,$(MAKECMDGOALS)),)
+#   make gog-safe -- --help
+#   make gog-safe -- gmail --help
+ifneq ($(filter gog-safe gogcli gog,$(MAKECMDGOALS)),)
 RUN_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
 $(eval $(RUN_ARGS):;@:)
 endif
@@ -38,7 +38,7 @@ build:
 	@mkdir -p $(BIN_DIR)
 	@go build -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD)
 
-gog: build
+gog-safe: build
 	@if [ -n "$(RUN_ARGS)" ]; then \
 		$(BIN) $(RUN_ARGS); \
 	elif [ -z "$(ARGS)" ]; then \
@@ -47,22 +47,18 @@ gog: build
 		$(BIN) $(ARGS); \
 	fi
 
-gogcli: build
-	@if [ -n "$(RUN_ARGS)" ]; then \
-		$(BIN) $(RUN_ARGS); \
-	elif [ -z "$(ARGS)" ]; then \
-		$(BIN) --help; \
-	else \
-		$(BIN) $(ARGS); \
-	fi
+gog: gog-safe
 
-gog-help: build
+gogcli: gog-safe
+
+gog-safe-help: build
 	@$(BIN) --help
 
-gogcli-help: build
-	@$(BIN) --help
+gog-help: gog-safe-help
 
-help: gog-help
+gogcli-help: gog-safe-help
+
+help: gog-safe-help
 
 tools:
 	@mkdir -p $(TOOLS_DIR)

@@ -170,7 +170,7 @@ func expectsFlagValue(node *completionNode, cword int, words []string, start int
 
 func isProgramName(word string) bool {
 	base := filepath.Base(word)
-	return strings.EqualFold(base, "gog") || strings.EqualFold(base, "gog.exe")
+	return strings.EqualFold(base, "gog-safe") || strings.EqualFold(base, "gog-safe.exe")
 }
 
 func buildCompletionNode(node *kong.Node) *completionNode {
